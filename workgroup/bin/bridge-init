@@ -1,7 +1,8 @@
 #!/bin/sh
 # bridge-init <name> --agents a,b,c --edges "a->b,b->c"
 set -eu
-HERE=$(cd "$(dirname "$0")" && pwd)
+SELF=$(readlink -f -- "$0" 2>/dev/null || printf %s "$0")
+HERE=$(cd "$(dirname "$SELF")" && pwd)
 . "$HERE/../lib/bridge.sh"
 
 NAME="" AGENTS="" EDGES=""
