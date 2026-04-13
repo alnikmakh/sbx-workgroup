@@ -17,8 +17,19 @@ for t in tmux yq jq git; do
   command -v "$t" >/dev/null 2>&1 || { echo "missing $t"; exit 2; }
 done
 
+# Hard-isolate from any tmux server the caller is currently attached to.
+# If $TMUX is inherited (e.g. the user ran this from inside their tmux), every
+# `tmux new-session` below would attach to the live server rather than spawn a
+# fresh one, and the EXIT trap's `tmux kill-server` would nuke the caller's
+# session. TMUX_TMPDIR alone doesn't protect against this — tmux honors $TMUX
+# first. So: unset $TMUX, then point at a scratch TMUX_TMPDIR so even the
+# default-socket codepath lands in a throwaway dir. Caught the hard way on
+# 2026-04-13 when running this script from inside a host tmux session took the
+# server down.
+unset TMUX TMUX_PANE
+
 SCRATCH=$(mktemp -d)
-trap 'tmux kill-server 2>/dev/null || true; rm -rf "$SCRATCH"' EXIT
+trap 'TMUX= tmux kill-server 2>/dev/null || true; rm -rf "$SCRATCH"' EXIT
 
 # Scratch layout mirroring the in-sandbox one.
 export WORK_ROOT="$SCRATCH/work"
