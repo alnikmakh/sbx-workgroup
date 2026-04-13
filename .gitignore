@@ -1,0 +1,33 @@
+# Per CLAUDE.md: session scratch goes in .tmp/, never committed.
+.tmp/
+
+# Claude Code per-project state (scheduled tasks, locks, history).
+.claude/
+
+# Workgroup-created git worktrees. These belong under ~/sbx-worktrees/
+# at runtime; any worktrees/ here is scratch from an older layout.
+worktrees/
+
+# Per-machine config should never be in-repo; it lives at
+# ~/.config/sbx-workgroup/machine.yaml.
+machine.yaml
+
+# Editor / OS droppings.
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Python caches (sidecar build context, mcp_mux.py dev).
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Node (none today, but keep in case tooling grows).
+node_modules/
+
+# Test scratch.
+*.log
+!plans/**/*.log
