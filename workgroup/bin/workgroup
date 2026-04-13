@@ -21,6 +21,9 @@ _lib="$_here/../lib"
 : "${BRIDGE_ROOT:=/bridge}"
 : "${WORK_ROOT:=/work}"
 : "${WORKGROUP_ROOT:=/opt/workgroup}"
+if [ -z "${WORKTREE_ROOT:-}" ] && [ -r /etc/workgroup/worktree-root ]; then
+    WORKTREE_ROOT=$(cat /etc/workgroup/worktree-root)
+fi
 
 die() { echo "workgroup: $*" >&2; exit 1; }
 
@@ -123,6 +126,15 @@ cmd_down() {
   tmux_kill_session "$_name"
 
   _bd="$BRIDGE_ROOT/$_name"
+  # Read the authoritative worktree path from state.json BEFORE archiving,
+  # otherwise we lose the handle in the mv below. Falls back to the legacy
+  # computed path only if state.json is missing.
+  _wt=""
+  if [ -f "$_bd/state.json" ]; then
+    _wt=$(jq -r '.worktree // ""' "$_bd/state.json")
+  fi
+  [ -n "$_wt" ] || _wt="${WORKTREE_ROOT:-$WORK_ROOT/worktrees}/$_name"
+
   if [ -d "$_bd" ]; then
     # /bridge/_archive/<name>-<ts>/.
     # Invariant: manifest name regex requires [a-z0-9] as the first char, so
@@ -134,7 +146,6 @@ cmd_down() {
   fi
 
   if [ "$_force" = 1 ]; then
-    _wt="$WORK_ROOT/worktrees/$_name"
     if [ -d "$_wt" ]; then
       worktree_remove_if_clean "$_wt"
       _rc=$?

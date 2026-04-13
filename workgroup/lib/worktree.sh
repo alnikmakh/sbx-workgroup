@@ -1,12 +1,26 @@
 #!/bin/sh
 # Phase 04 worktree resolution. Three modes:
-#   default  → git worktree add /work/worktrees/<name> -b <branch> [<base>]
+#   default  → git worktree add <WORKTREE_ROOT>/<name> -b <branch> [<base>]
 #   explicit → use user-supplied path, assert it is a valid worktree
 #   none     → use /work directly (with a warning about concurrent writes)
 #
 # $WORK_ROOT (default /work) lets tests point at a scratch repo.
+# $WORKTREE_ROOT is where default-mode worktrees live — outside $WORK_ROOT so
+# cgc indexing of /work doesn't see a duplicate copy of the repo. Resolution:
+#   1. Env var already set (tests, explicit override).
+#   2. /etc/workgroup/worktree-root, populated by postinstall.sh from the
+#      host-mounted ~/sbx-worktrees/<project> directory.
+#   3. Fallback to $WORK_ROOT/worktrees (legacy — keeps tests green and
+#      non-sandbox runs working, at the cost of the cgc-duplication bug).
 
 : "${WORK_ROOT:=/work}"
+if [ -z "${WORKTREE_ROOT:-}" ]; then
+    if [ -r /etc/workgroup/worktree-root ]; then
+        WORKTREE_ROOT=$(cat /etc/workgroup/worktree-root)
+    else
+        WORKTREE_ROOT="$WORK_ROOT/worktrees"
+    fi
+fi
 
 _wt_die() { echo "worktree: $*" >&2; return 1; }
 
@@ -31,7 +45,7 @@ worktree_resolve() {
       return 0
       ;;
     default)
-      _wt="$WORK_ROOT/worktrees/$_name"
+      _wt="$WORKTREE_ROOT/$_name"
       if [ -d "$_wt" ]; then
         # Already present from an earlier up — reuse it, but verify branch.
         _cur=$(git -C "$_wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')
@@ -42,7 +56,7 @@ worktree_resolve() {
         printf '%s' "$_wt"
         return 0
       fi
-      mkdir -p "$WORK_ROOT/worktrees"
+      mkdir -p "$WORKTREE_ROOT"
       if [ -n "$_base" ]; then
         git -C "$WORK_ROOT" rev-parse --verify "$_base" >/dev/null 2>&1 \
           || { _wt_die "base ref not found in $WORK_ROOT: $_base"; return 1; }

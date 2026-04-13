@@ -14,6 +14,7 @@ need() { command -v "$1" >/dev/null 2>&1; }
 # sources are passed in by provision.sh via `sbx exec -e`.
 : "${WORK_SRC:?WORK_SRC not set (pass via sbx exec -e)}"
 : "${BRIDGE_SRC:?BRIDGE_SRC not set (pass via sbx exec -e)}"
+: "${WORKTREE_SRC:?WORKTREE_SRC not set (pass via sbx exec -e)}"
 : "${WORKGROUP_SRC:?WORKGROUP_SRC not set (pass via sbx exec -e)}"
 : "${SIDECAR_PORT:?SIDECAR_PORT not set (pass via sbx exec -e)}"
 
@@ -34,8 +35,18 @@ link_contract /work          "$WORK_SRC"
 link_contract /bridge        "$BRIDGE_SRC"
 link_contract /opt/workgroup "$WORKGROUP_SRC"
 
+# WORKTREE_SRC is mounted at its real host path inside the sandbox (sbx mounts
+# host paths at the same path). No symlink — git worktree metadata records the
+# worktree's absolute path in .git/worktrees/<name>/gitdir, and that path must
+# be valid both inside the sandbox and on the host. Using the real host path
+# for both sides makes git worktree listings consistent across the boundary.
+[ -d "$WORKTREE_SRC" ] || die "WORKTREE_SRC missing: $WORKTREE_SRC"
+[ -w "$WORKTREE_SRC" ] || die "WORKTREE_SRC not writable: $WORKTREE_SRC"
+
 # Persist the sidecar port so phase 04 can construct the claude mcp add URL.
 printf '%s\n' "$SIDECAR_PORT" > /etc/workgroup/sidecar-port
+# Persist the worktree root so workgroup/lib/worktree.sh can read it.
+printf '%s\n' "$WORKTREE_SRC" > /etc/workgroup/worktree-root
 
 # -- 1. Packages --------------------------------------------------------------
 pkgs_common="tmux git inotify-tools jq curl ca-certificates"
@@ -200,5 +211,6 @@ cat >&2 <<EOF
   yq:      $(yq --version 2>/dev/null || echo '?')
   claude:  $(as_sbx_user claude --version 2>/dev/null || echo '?')
   mounts:  $(ls -ld /work /bridge /opt/workgroup | awk '{print $NF}' | tr '\n' ' ')
+  wtroot:  ${WORKTREE_SRC}
   cgc mcp: ${cgc_status}
 EOF

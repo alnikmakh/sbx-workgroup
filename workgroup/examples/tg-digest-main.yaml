@@ -1,0 +1,21 @@
+name: tg-digest-main
+
+worktree:
+  branch: wg/tg-digest-main
+  base: master
+
+agents:
+  - id: planner
+    role: planner
+  - id: reviewer
+    role: reviewer
+  - id: executor
+    role: executor
+
+edges:
+  - planner -> reviewer
+  - reviewer -> planner
+  - reviewer -> executor
+  - executor -> reviewer
+
+layout: tiled

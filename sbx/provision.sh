@@ -59,6 +59,13 @@ project_dir="$projects_root/$project"
 bridge_dir="$HOME/sbx-bridge"
 mkdir -p "$bridge_dir"
 
+# Worktrees live on a dedicated host mount outside $projects_root so that
+# cgc indexing of /work doesn't walk a duplicate copy of the repo (see
+# plans/07-resume.md / tg-digest cgc-index-report.md). One subdir per project
+# keeps namespaces independent across sandboxes.
+worktree_dir="$HOME/sbx-worktrees/$project"
+mkdir -p "$worktree_dir"
+
 workgroup_payload="$repo/workgroup"
 [ -d "$workgroup_payload" ] || die "missing workgroup payload dir: $workgroup_payload"
 
@@ -72,6 +79,7 @@ run_postinstall() {
     sbx exec -u root \
         -e "WORK_SRC=$project_dir" \
         -e "BRIDGE_SRC=$bridge_dir" \
+        -e "WORKTREE_SRC=$worktree_dir" \
         -e "WORKGROUP_SRC=$workgroup_payload" \
         -e "SIDECAR_PORT=$port" \
         "$vm_name" "$workgroup_payload/etc/postinstall.sh"
@@ -134,6 +142,7 @@ sbx create shell \
     --memory "$memory" \
     "$project_dir" \
     "$bridge_dir" \
+    "$worktree_dir" \
     "$workgroup_payload:ro"
 
 # Step 7a: allow the sandbox proxy to reach the sidecar.

@@ -15,13 +15,13 @@ Responsibilities:
 1. Verify the `sbx` CLI (Docker Sandboxes, v0.24+) is installed; if not, print install pointer and exit non-zero.
 2. Load `~/.config/sbx-workgroup/machine.yaml`; error with a precise message if missing.
 3. Resolve the project source path to `${projects_root}/<project>`. Verify it exists.
-4. Ensure `~/sbx-bridge` exists; create if missing.
+4. Ensure `~/sbx-bridge` and `~/sbx-worktrees/<project>` exist; create if missing. The worktree root is a per-project host dir; it must live outside `${projects_root}/<project>` so cgc's indexing of `/work` doesn't walk a duplicate copy of the repo.
 5. **Ensure the project's sidecar is up** — `port=$(sbx/host-mcp/sidecar-up.sh <project>)`. `sidecar-up.sh` is idempotent; on first call it builds the sidecar image if missing, starts the container, and waits for `/health` to answer. Capture the printed host port for step 7a.
 6. Check whether a sandbox with the chosen name already exists (`sbx ls -q`). If yes, re-run postinstall (idempotent) and exit 0; the user runs `sbx run <name>` manually.
 7. `sbx create shell` the sandbox with:
    - Name (default: `sbx-<project>`; override via `--name`).
    - `--memory` (default: `8g`; override via `--memory`). `sbx` does not expose `--cpus` or `--disk`.
-   - Positional workspace paths: `<project_dir> ~/sbx-bridge <repo>/workgroup:ro`. **`sbx` always mounts host paths at the same path inside the sandbox**; the `/work`, `/bridge`, `/opt/workgroup` contract is materialized as symlinks by `postinstall.sh`.
+   - Positional workspace paths: `<project_dir> ~/sbx-bridge ~/sbx-worktrees/<project> <repo>/workgroup:ro`. **`sbx` always mounts host paths at the same path inside the sandbox**; the `/work`, `/bridge`, `/opt/workgroup` contract is materialized as symlinks by `postinstall.sh`. The worktree root stays at its real host path (no symlink) so git worktree metadata — which records absolute paths in `.git/worktrees/<name>/gitdir` — is valid from both sides.
    - The `shell` agent is used (not `claude`) — we run tmux + multiple claude panes ourselves in Phase 04, so the sandbox must not auto-launch an agent.
 7a. `sbx ports <name> --publish 127.0.0.1:${port}:8811` — publishes the sidecar's hashed host port to the sandbox's fixed guest port 8811. `sbx` does not accept `--publish` at create time; it is a separate post-create subcommand.
 8. On first-boot success: `sbx exec -u root -e WORK_SRC=... -e BRIDGE_SRC=... -e WORKGROUP_SRC=... <name> <repo>/workgroup/etc/postinstall.sh`. The env vars tell postinstall the real host paths so it can materialize the `/work`, `/bridge`, `/opt/workgroup` symlinks. The postinstall script is invoked by its real host path because `/opt/workgroup` does not exist until it has run at least once.
@@ -42,11 +42,11 @@ This is the only supported lifecycle-coupling between sandbox and sidecar. `work
 
 Lives under `workgroup/` rather than `sbx/` because it is the guest-side companion to the host-side `sbx/` scripts and is delivered into the sandbox through the `<repo>/workgroup` workspace mount. Invoked by its real host path (not `/opt/workgroup/...`) on first run because the `/opt/workgroup` symlink does not exist until step 0 below runs.
 
-Inputs (passed via `sbx exec -e`): `WORK_SRC`, `BRIDGE_SRC`, `WORKGROUP_SRC` — the real host paths that `provision.sh` asked `sbx create shell` to mount.
+Inputs (passed via `sbx exec -e`): `WORK_SRC`, `BRIDGE_SRC`, `WORKTREE_SRC`, `WORKGROUP_SRC` — the real host paths that `provision.sh` asked `sbx create shell` to mount.
 
 Responsibilities:
 
-0. **Materialize the guest-path contract.** Create `/work`, `/bridge`, `/opt/workgroup` as symlinks to `WORK_SRC`, `BRIDGE_SRC`, `WORKGROUP_SRC` respectively. Refuse to clobber non-symlink entries at those paths. Idempotent.
+0. **Materialize the guest-path contract.** Create `/work`, `/bridge`, `/opt/workgroup` as symlinks to `WORK_SRC`, `BRIDGE_SRC`, `WORKGROUP_SRC` respectively. Refuse to clobber non-symlink entries at those paths. Assert `WORKTREE_SRC` is present and writable at its real host path (no symlink — see mount-table note in `00-overview.md`). Persist `WORKTREE_SRC` to `/etc/workgroup/worktree-root` so `workgroup/lib/worktree.sh` can read it. Idempotent.
 1. Detect package manager (Alpine/Debian/Ubuntu likely). Install: `tmux`, `git`, `inotify-tools`, `yq`, `jq`, `flock` (via `util-linux`), `curl`, `ca-certificates`. **No docker inside the sandbox** — the MCP stack runs on the host.
 2. Install Claude Code (follow the official install instructions for the sandbox's distro).
 3. Symlink `/opt/workgroup/bin/*` onto PATH (into `/usr/local/bin`): `workgroup`, `bridge-send`, `bridge-recv`, `bridge-peek`, `bridge-watch`, `bridge-init`. Empty-bin is a graceful no-op until Phases 03/04 populate it.

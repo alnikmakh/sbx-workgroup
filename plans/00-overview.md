@@ -49,8 +49,9 @@ Every later phase depends on these contracts — and only on these. Changing any
 
 | Path inside VM | Host source                         | Purpose                                  |
 |----------------|-------------------------------------|------------------------------------------|
-| `/work`        | `${projects_root}/<project>`        | Project repo; `/work/worktrees/<name>` per workgroup |
+| `/work`        | `${projects_root}/<project>`        | Project repo (read only as far as cgc is concerned — worktrees live elsewhere) |
 | `/bridge`      | `~/sbx-bridge`                      | Agent messaging (host-persisted)         |
+| `~/sbx-worktrees/<project>` | `~/sbx-worktrees/<project>` (same path inside the VM — no symlink) | Per-workgroup git worktrees, one subdir per workgroup name. Deliberately outside `/work` so cgc's indexing of `/work` doesn't walk a duplicate copy of the repo. Path recorded in `/etc/workgroup/worktree-root` inside the VM. |
 | `/opt/workgroup` | copied from this repo during postinstall | CLI payload (`bin/`, `lib/`, `templates/`, `etc/`) |
 
 `${projects_root}` and `${cgc_data_root}` come from the per-machine config file `~/.config/sbx-workgroup/machine.yaml` (Phase 02 contract). Nothing committed to this repo encodes an absolute host path.
