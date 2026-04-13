@@ -49,7 +49,7 @@ printf '%s\n' "$SIDECAR_PORT" > /etc/workgroup/sidecar-port
 printf '%s\n' "$WORKTREE_SRC" > /etc/workgroup/worktree-root
 
 # -- 1. Packages --------------------------------------------------------------
-pkgs_common="tmux git inotify-tools jq curl ca-certificates"
+pkgs_common="tmux git inotify-tools jq curl ca-certificates locales"
 # flock ships in util-linux on debian/alpine; yq is a separate binary.
 
 wait_for_apt_lock() {
@@ -86,8 +86,8 @@ install_debian() {
 
 install_alpine() {
     apk update
-    # shellcheck disable=SC2086
-    apk add --no-cache $pkgs_common util-linux yq
+    # alpine's musl ships C.UTF-8 without a separate package; drop `locales`.
+    apk add --no-cache tmux git inotify-tools jq curl ca-certificates util-linux yq
 }
 
 if [ -r /etc/os-release ]; then
@@ -106,6 +106,52 @@ for b in tmux git jq yq flock curl inotifywait; do
     need "$b" || die "missing after install: $b"
 done
 log "packages ok"
+
+# -- 1a. Locale ---------------------------------------------------------------
+# Without UTF-8 in the env, tmux replaces non-ASCII glyphs with `_`, claude's
+# status output becomes garbled, and python/node complain on stderr. C.UTF-8
+# is in glibc and musl without needing locale-gen, so it works on every sane
+# distro. Write both /etc/environment (read by PAM on login) and a
+# profile.d script (read by every POSIX shell) so `sbx run` sessions and
+# non-login shells both see it.
+if ! grep -q '^LANG=C.UTF-8' /etc/environment 2>/dev/null; then
+    # Strip any prior LANG/LC_ALL lines, then append ours.
+    if [ -f /etc/environment ]; then
+        sed -i '/^LANG=/d;/^LC_ALL=/d' /etc/environment
+    fi
+    {
+        printf 'LANG=C.UTF-8\n'
+        printf 'LC_ALL=C.UTF-8\n'
+    } >> /etc/environment
+    log "set LANG=C.UTF-8 in /etc/environment"
+fi
+cat > /etc/profile.d/locale.sh <<'EOF'
+# Written by workgroup postinstall.sh. Forces UTF-8 for all shells so tmux
+# renders Unicode and claude's output isn't mangled.
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+EOF
+chmod 0644 /etc/profile.d/locale.sh
+# Interactive non-login bash (what `sbx run` typically drops into) doesn't
+# read profile.d, so also wire it through bash.bashrc.
+if [ -f /etc/bash.bashrc ] && ! grep -q 'workgroup-locale' /etc/bash.bashrc; then
+    cat >> /etc/bash.bashrc <<'EOF'
+
+# workgroup-locale: ensure UTF-8 in interactive non-login shells.
+export LANG=${LANG:-C.UTF-8}
+export LC_ALL=${LC_ALL:-C.UTF-8}
+EOF
+fi
+
+# -- 1b. System tmux config ---------------------------------------------------
+# Symlink so edits in the repo show up without reprovisioning.
+if [ -f /opt/workgroup/etc/tmux.conf ]; then
+    if [ ! -L /etc/tmux.conf ] || \
+       [ "$(readlink /etc/tmux.conf)" != /opt/workgroup/etc/tmux.conf ]; then
+        ln -sfn /opt/workgroup/etc/tmux.conf /etc/tmux.conf
+        log "linked /etc/tmux.conf -> /opt/workgroup/etc/tmux.conf"
+    fi
+fi
 
 # -- 2. Claude Code -----------------------------------------------------------
 # Soft install: Balanced network policy blocks claude.ai by default. Rather
