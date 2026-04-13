@@ -77,14 +77,45 @@ run_postinstall() {
         "$vm_name" "$workgroup_payload/etc/postinstall.sh"
 }
 
-ensure_policy() {
-    # Idempotently allow the sandbox HTTP proxy to reach the sidecar.
-    if sbx policy ls 2>/dev/null | grep -q "localhost:$port"; then
-        log "policy allow network localhost:$port already present"
+ensure_policy_host() {
+    # Idempotently add one `sbx policy allow network <host:port>` rule.
+    local rule="$1"
+    if sbx policy ls 2>/dev/null | grep -qw "$rule"; then
+        log "policy $rule already present"
     else
-        log "adding policy allow network localhost:$port"
-        sbx policy allow network "localhost:$port" >&2
+        log "adding policy allow network $rule"
+        sbx policy allow network "$rule" >&2
     fi
+}
+
+ensure_policy() {
+    # The sandbox runs under sbx's Balanced policy, which denies by default.
+    # Everything our bring-up actually touches must be explicitly allowed:
+    #
+    #   - localhost:<sidecar-port>        sandbox HTTP proxy → host sidecar
+    #   - archive/security.ubuntu.com:80  postinstall apt-get update/install
+    #   - {objects,release-assets}.githubusercontent.com:443
+    #                                     apt/GitHub release assets
+    #   - claude.ai:443 + downloads.claude.ai:443
+    #                                     claude installer (curl https://claude.ai/install.sh)
+    #   - {console,login,auth}.anthropic.com:443 + claude.com:443
+    #                                     `claude /login` OAuth flow
+    #
+    # Already covered by sbx default bundles (no action needed):
+    #   api.anthropic.com, statsig.anthropic.com, platform.claude.com
+    #     (default-ai-services)
+    #   github.com, ports.ubuntu.com                       (default-code-and-containers / default-os-packages)
+    ensure_policy_host "localhost:$port"
+    ensure_policy_host "archive.ubuntu.com:80"
+    ensure_policy_host "security.ubuntu.com:80"
+    ensure_policy_host "objects.githubusercontent.com:443"
+    ensure_policy_host "release-assets.githubusercontent.com:443"
+    ensure_policy_host "claude.ai:443"
+    ensure_policy_host "downloads.claude.ai:443"
+    ensure_policy_host "console.anthropic.com:443"
+    ensure_policy_host "login.anthropic.com:443"
+    ensure_policy_host "auth.anthropic.com:443"
+    ensure_policy_host "claude.com:443"
 }
 
 # Step 6: sandbox already present?

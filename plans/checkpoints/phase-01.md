@@ -101,13 +101,17 @@ Logs captured: `.tmp/provision-run1.log` (first attempt, failed on `sbx ports`),
 
 ## Remaining work (not blocking Phase 01 handoff)
 
-1. **Codify the full allow-list in `provision.sh`.** Currently, these rules must already exist (added manually during verification):
-   - `archive.ubuntu.com:80`
-   - `security.ubuntu.com:80`
-   - `objects.githubusercontent.com:443`
-   - `release-assets.githubusercontent.com:443`
-   - (`ports.ubuntu.com:80` and `github.com:443` are already covered by `default-os-packages` and `default-code-and-containers` — no action needed.)
-   A follow-up should have `provision.sh` assert/add these with the same idempotent `sbx policy ls | grep` check used for the sidecar rule.
+1. ~~**Codify the full allow-list in `provision.sh`.**~~ Done 2026-04-13
+   during Phase 06 setup. `sbx/provision.sh:ensure_policy` now idempotently
+   adds all required rules via an `ensure_policy_host` helper. The list
+   includes the original apt/GitHub rules (`archive.ubuntu.com:80`,
+   `security.ubuntu.com:80`, `objects.githubusercontent.com:443`,
+   `release-assets.githubusercontent.com:443`) plus the claude installer
+   + OAuth hosts that surfaced during Phase 04 bring-up (`claude.ai:443`,
+   `downloads.claude.ai:443`, `console.anthropic.com:443`,
+   `login.anthropic.com:443`, `auth.anthropic.com:443`, `claude.com:443`).
+   Covered by `default-*` bundles: `ports.ubuntu.com`, `github.com`,
+   `api.anthropic.com`, `statsig.anthropic.com`, `platform.claude.com`.
 
 2. **Claude install under Balanced policy.** `curl https://claude.ai/install.sh | sh` returns 403 because `claude.ai` is not in the default allowlist. `postinstall.sh` now logs a soft warning with the exact remediation: `sbx policy allow network claude.ai:443`. It may also need transitive hosts (CDN / release assets) — untested. Check 7 of the verification matrix depends on this.
 

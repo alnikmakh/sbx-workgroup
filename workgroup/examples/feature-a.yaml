@@ -1,0 +1,16 @@
+name: feature-a
+
+worktree:
+  branch: wg/feature-a
+
+agents:
+  - id: planner
+    role: planner
+  - id: executor
+    role: executor
+
+edges:
+  - planner -> executor
+  - executor -> planner
+
+layout: even-horizontal

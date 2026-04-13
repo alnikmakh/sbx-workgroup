@@ -1,0 +1,16 @@
+name: pair
+
+worktree:
+  branch: wg/pair
+
+agents:
+  - id: planner
+    role: planner
+  - id: executor
+    role: executor
+
+edges:
+  - planner -> executor
+  - executor -> planner
+
+layout: even-horizontal

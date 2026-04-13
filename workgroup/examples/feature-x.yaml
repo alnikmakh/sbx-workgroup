@@ -2,6 +2,7 @@ name: feature-x
 
 worktree:
   branch: wg/feature-x
+  base: main
 
 agents:
   - id: planner

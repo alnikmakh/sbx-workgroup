@@ -28,10 +28,10 @@ Prereqs: host has Docker `sbx` installed; `~/.config/sbx-workgroup/machine.yaml`
 - [ ] `docker ps` shows `cgc-sidecar-<project>` running (brought up by `provision.sh`'s sidecar step).
 
 ### 2. Inside-VM sanity
-- [ ] `sbx run <name> -- sh -c 'ls -ld /work /bridge /opt/workgroup'` — all three present.
-- [ ] `sbx run <name> -- sh -c 'curl -sS http://127.0.0.1:8811/mcp -o /dev/null && echo ok'` prints `ok` — proves `--publish` wiring reaches the host sidecar.
+- [ ] `sbx exec <name> -- sh -c 'ls -ld /work /bridge /opt/workgroup'` — all three present.
+- [ ] `sbx exec <name> -- sh -c 'curl -fsS http://host.docker.internal:$(cat /etc/workgroup/sidecar-port)/health >/dev/null && echo ok'` prints `ok` — proves sbx policy + HTTP proxy reach the host sidecar. (Note: the original draft said `http://127.0.0.1:8811/mcp` via `sbx ports --publish`; that wiring doesn't apply — see Phase 01 checkpoint §2.)
 - [ ] `command -v workgroup bridge-send bridge-recv bridge-peek bridge-watch bridge-init` — all resolve.
-- [ ] `docker` is **not** installed inside the VM (negative check).
+- [ ] (The earlier "docker absent inside VM" negative check was based on a wrong assumption about the `shell-docker` template, which ships docker on purpose. Removed.)
 
 ### 3. MCP sidecar from inside the VM
 - [ ] In a plain `claude` session inside the VM: `claude mcp list` shows `cgc` as connected.

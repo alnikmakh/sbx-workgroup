@@ -1,0 +1,8 @@
+name: bad-edges
+
+agents:
+  - id: planner
+    role: planner
+
+edges:
+  - planner -> ghost
