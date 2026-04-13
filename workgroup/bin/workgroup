@@ -1,0 +1,229 @@
+#!/bin/sh
+# Phase 04 dispatcher. POSIX sh. Sources lib/{manifest,worktree,tmux,bridge}.sh.
+set -eu
+
+_self=$(readlink -f -- "$0" 2>/dev/null || printf %s "$0")
+_here=$(CDPATH='' cd -- "$(dirname -- "$_self")" && pwd)
+# /opt/workgroup/bin/workgroup → /opt/workgroup/lib; but during dev or tests we
+# may be invoked from the repo, in which case ../lib resolves the same way.
+# readlink -f resolves the /usr/local/bin/workgroup symlink written by
+# postinstall.sh so ../lib lands inside /opt/workgroup, not /usr/local.
+_lib="$_here/../lib"
+# shellcheck source=/dev/null
+. "$_lib/manifest.sh"
+# shellcheck source=/dev/null
+. "$_lib/worktree.sh"
+# shellcheck source=/dev/null
+. "$_lib/tmux.sh"
+# shellcheck source=/dev/null
+. "$_lib/bridge.sh"
+
+: "${BRIDGE_ROOT:=/bridge}"
+: "${WORK_ROOT:=/work}"
+: "${WORKGROUP_ROOT:=/opt/workgroup}"
+
+die() { echo "workgroup: $*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+usage: workgroup <command> [args]
+
+  up <file.yaml> [--worktree PATH] [--no-worktree]
+  down <name> [--force]
+  ls
+  attach <name>
+  status <name>
+  logs <name> <agent>
+EOF
+}
+
+cmd_up() {
+  _file='' _wt_mode=default _wt_path=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --worktree) _wt_mode=explicit; _wt_path=${2:-}; shift 2 ;;
+      --no-worktree) _wt_mode=none; shift ;;
+      -h|--help) usage; return 0 ;;
+      -*) die "up: unknown flag $1" ;;
+      *) [ -z "$_file" ] && _file=$1 || die "up: extra arg $1"; shift ;;
+    esac
+  done
+  [ -n "$_file" ] || die "up: manifest file required"
+
+  manifest_parse "$_file" || exit 1
+  manifest_validate "$_file" "$WORKGROUP_ROOT/templates" || exit 1
+
+  tmux_session_exists "$WG_NAME" \
+    && die "session '$WG_NAME' already exists — attach with 'workgroup attach $WG_NAME' or remove with 'workgroup down $WG_NAME'"
+
+  # Sidecar sanity check. Endpoint per Phase 01 checkpoint: host.docker.internal
+  # with port from /etc/workgroup/sidecar-port. Skip silently if we're not in
+  # the sandbox (file absent) — the dev/test path doesn't need it.
+  if [ -f /etc/workgroup/sidecar-port ]; then
+    _port=$(cat /etc/workgroup/sidecar-port)
+    _url="http://host.docker.internal:$_port/mcp"
+    curl -sS -o /dev/null --max-time 3 "$_url" \
+      || die "sidecar not reachable at $_url — rerun sbx/provision.sh on the host"
+  fi
+
+  _wt=$(worktree_resolve "$WG_NAME" "$_wt_mode" "$WG_BRANCH" "$WG_BASE" "$_wt_path") || exit 1
+
+  # Initialize the bridge namespace via Phase 03 helper.
+  bridge_init "$WG_NAME" "$WG_AGENTS" "$WG_EDGES" || die "bridge_init failed"
+  _bd=$(bridge_path "$WG_NAME")
+
+  # Populate state.json fields Phase 04 owns.
+  _state="$_bd/state.json"
+  (
+    flock 9
+    _tmp="$_state.new.$$"
+    jq --arg wt "$_wt" --arg br "$WG_BRANCH" \
+       '.worktree=$wt | .branch=$br' "$_state" > "$_tmp"
+    mv "$_tmp" "$_state"
+  ) 9>"$_state.lock"
+
+  # Copy role briefings into the bridge.
+  _old=${IFS- }; IFS=','
+  for _a in $WG_AGENTS; do
+    _src=$(manifest_role_file_for "$_a")
+    cp "$_src" "$_bd/roles/$_a.md"
+  done
+  IFS=$_old
+
+  # Build tmux session + launch panes.
+  # shellcheck disable=SC2086
+  tmux_create_session "$WG_NAME" "$WG_LAYOUT" $(printf '%s' "$WG_AGENTS" | tr ',' ' ') \
+    || die "tmux create failed"
+  tmux_add_watch_window "$WG_NAME" "$WG_NAME" || die "watch window failed"
+
+  _old=${IFS- }; IFS=','
+  for _a in $WG_AGENTS; do
+    _out=$(manifest_peers_out "$_a")
+    _in=$(manifest_peers_in "$_a")
+    tmux_send_launch "$WG_NAME" "$_a" "$_wt" "$_bd" "$_out" "$_in" "$_bd/roles/$_a.md"
+  done
+  IFS=$_old
+
+  printf 'Workgroup "%s" up. Attach with: workgroup attach %s\n' "$WG_NAME" "$WG_NAME"
+  printf '  worktree: %s\n  branch:   %s\n  agents:   %s\n  edges:    %s\n' \
+    "$_wt" "$WG_BRANCH" "$WG_AGENTS" "$WG_EDGES"
+}
+
+cmd_down() {
+  _name='' _force=0
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --force) _force=1; shift ;;
+      -*) die "down: unknown flag $1" ;;
+      *) [ -z "$_name" ] && _name=$1 || die "down: extra arg $1"; shift ;;
+    esac
+  done
+  [ -n "$_name" ] || die "down: name required"
+
+  tmux_kill_session "$_name"
+
+  _bd="$BRIDGE_ROOT/$_name"
+  if [ -d "$_bd" ]; then
+    # /bridge/_archive/<name>-<ts>/.
+    # Invariant: manifest name regex requires [a-z0-9] as the first char, so
+    # no workgroup can ever be named "_archive" and shadow this dir. Do NOT
+    # relax the regex without also moving the archive root.
+    mkdir -p "$BRIDGE_ROOT/_archive"
+    _ts=$(date -u +%Y%m%dT%H%M%SZ)
+    mv "$_bd" "$BRIDGE_ROOT/_archive/$_name-$_ts"
+  fi
+
+  if [ "$_force" = 1 ]; then
+    _wt="$WORK_ROOT/worktrees/$_name"
+    if [ -d "$_wt" ]; then
+      worktree_remove_if_clean "$_wt"
+      _rc=$?
+      case $_rc in
+        0) printf 'removed worktree: %s\n' "$_wt" ;;
+        1) die "worktree $_wt has uncommitted changes; commit or stash first" ;;
+        2) die "$_wt is not a git worktree" ;;
+      esac
+    fi
+  fi
+
+  printf 'Workgroup "%s" down.\n' "$_name"
+}
+
+cmd_ls() {
+  printf '%-20s %-8s %-8s %s\n' NAME STATUS AGENTS WORKTREE
+  # Active = tmux sessions.
+  tmux ls -F '#{session_name}' 2>/dev/null | while read -r _s; do
+    [ -n "$_s" ] || continue
+    _st="$BRIDGE_ROOT/$_s/state.json"
+    if [ -f "$_st" ]; then
+      _ac=$(jq -r '.agents | length' "$_st")
+      _wt=$(jq -r '.worktree // ""' "$_st")
+    else
+      _ac='?'; _wt='?'
+    fi
+    printf '%-20s %-8s %-8s %s\n' "$_s" running "$_ac" "$_wt"
+  done
+  if [ -d "$BRIDGE_ROOT/_archive" ]; then
+    for _d in "$BRIDGE_ROOT/_archive"/*/; do
+      [ -d "$_d" ] || continue
+      _b=$(basename "$_d")
+      printf '%-20s %-8s %-8s %s\n' "$_b" archived '-' '-'
+    done
+  fi
+}
+
+cmd_attach() {
+  [ $# -eq 1 ] || die "attach: exactly one name required"
+  tmux_session_exists "$1" || die "no such session: $1"
+  exec tmux attach -t "=$1"
+}
+
+cmd_status() {
+  [ $# -eq 1 ] || die "status: exactly one name required"
+  _name=$1
+  _st="$BRIDGE_ROOT/$_name/state.json"
+  [ -f "$_st" ] || die "no bridge for '$_name'"
+  printf '%-12s %-8s %s\n' agent inbox last-activity
+  _ids=$(jq -r '.agents[].id' "$_st")
+  # Pane activity map (may be empty if session gone).
+  _pa=$(tmux list-panes -t "=$_name:agents" -F '#{pane_title} #{t:pane_activity}' 2>/dev/null || true)
+  _now=$(date +%s)
+  printf '%s\n' "$_ids" | while read -r _a; do
+    [ -n "$_a" ] || continue
+    _count=$(find "$BRIDGE_ROOT/$_name/inbox/$_a" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l)
+    _ts=$(printf '%s\n' "$_pa" | awk -v a="$_a" '$1==a {print $2; exit}')
+    if [ -n "$_ts" ]; then
+      _age=$(( _now - _ts ))
+      _la="${_age}s ago"
+    else
+      _la='-'
+    fi
+    printf '%-12s %-8s %s\n' "$_a" "$_count" "$_la"
+  done
+}
+
+cmd_logs() {
+  [ $# -eq 2 ] || die "logs: <name> <agent> required"
+  _name=$1 _ag=$2
+  tmux_session_exists "$_name" || die "no such session: $_name"
+  _idx=$(tmux_pane_index_for_agent "$_name" "$_ag")
+  [ -n "$_idx" ] || die "no pane titled '$_ag' in session '$_name'"
+  tmux capture-pane -t "$_name:agents.$_idx" -p -S -3000
+}
+
+main() {
+  [ $# -ge 1 ] || { usage; exit 1; }
+  _sub=$1; shift
+  case $_sub in
+    up)     cmd_up     "$@" ;;
+    down)   cmd_down   "$@" ;;
+    ls)     cmd_ls     "$@" ;;
+    attach) cmd_attach "$@" ;;
+    status) cmd_status "$@" ;;
+    logs)   cmd_logs   "$@" ;;
+    -h|--help|help) usage ;;
+    *) die "unknown subcommand: $_sub" ;;
+  esac
+}
+
+main "$@"

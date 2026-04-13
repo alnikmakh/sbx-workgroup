@@ -1,0 +1,6 @@
+name: bad-layout
+agents:
+  - id: a
+    role: planner
+edges: []
+layout: pinwheel

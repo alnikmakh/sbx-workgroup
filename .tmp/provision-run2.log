@@ -1,0 +1,28 @@
+[provision] ensuring sidecar for 'sbx' is up
+[sidecar-up] already running on 127.0.0.1:8560
+[provision] sidecar bound to 127.0.0.1:8560
+[provision] sandbox 'sbx-sbx' already exists; re-running postinstall (idempotent)
+[provision] policy allow network localhost:8560 already present
+Sandbox sbx-sbx started successfully
+INFO: Starting Docker daemon
+[postinstall] linked /work -> /home/aleksandr/My_Projects/sbx
+[postinstall] linked /bridge -> /home/aleksandr/sbx-bridge
+[postinstall] linked /opt/workgroup -> /home/aleksandr/My_Projects/sbx/workgroup
+Err:1 http://archive.ubuntu.com/ubuntu questing InRelease
+  403  Forbidden [IP: fd0f:d035:59f2:: 3128]
+Err:2 http://security.ubuntu.com/ubuntu questing-security InRelease
+  403  Forbidden [IP: fd0f:d035:59f2:: 3128]
+Err:3 http://archive.ubuntu.com/ubuntu questing-updates InRelease
+  403  Forbidden [IP: fd0f:d035:59f2:: 3128]
+Err:4 http://archive.ubuntu.com/ubuntu questing-backports InRelease
+  403  Forbidden [IP: fd0f:d035:59f2:: 3128]
+Hit:5 https://download.docker.com/linux/ubuntu questing InRelease
+Reading package lists...
+E: The repository 'http://archive.ubuntu.com/ubuntu questing InRelease' is not signed.
+E: Failed to fetch http://archive.ubuntu.com/ubuntu/dists/questing/InRelease  403  Forbidden [IP: fd0f:d035:59f2:: 3128]
+E: The repository 'http://security.ubuntu.com/ubuntu questing-security InRelease' is not signed.
+E: Failed to fetch http://security.ubuntu.com/ubuntu/dists/questing-security/InRelease  403  Forbidden [IP: fd0f:d035:59f2:: 3128]
+E: Failed to fetch http://archive.ubuntu.com/ubuntu/dists/questing-updates/InRelease  403  Forbidden [IP: fd0f:d035:59f2:: 3128]
+E: The repository 'http://archive.ubuntu.com/ubuntu questing-updates InRelease' is not signed.
+E: Failed to fetch http://archive.ubuntu.com/ubuntu/dists/questing-backports/InRelease  403  Forbidden [IP: fd0f:d035:59f2:: 3128]
+E: The repository 'http://archive.ubuntu.com/ubuntu questing-backports InRelease' is not signed.

@@ -1,0 +1,32 @@
+[provision] ensuring sidecar for 'sbx' is up
+[sidecar-up] already running on 127.0.0.1:8560
+[provision] sidecar bound to 127.0.0.1:8560
+[provision] creating sandbox 'sbx-sbx' (memory=8g)
+57b57c48fcd3: Download complete
+7d03afae3173: Download complete
+83f3d4cdc3a3: Download complete
+6333c51ff466: Download complete
+83b848d6a311: Download complete
+a7a19939eb68: Download complete
+c9250b2d50c5: Download complete
+e6b4c46aaba2: Download complete
+16c195d4c5e9: Download complete
+27b3e84fea8d: Download complete
+eec50e6e6753: Download complete
+98470bca7e13: Download complete
+93a75f37f783: Download complete
+f026a14589a0: Download complete
+e86927fdeaea: Download complete
+aac100fd0b36: Download complete
+Digest: sha256:57b57c48fcd396c3327ad4e7b4c7b0371de8e6432a6436dd5aafe586202ac9cd
+Status: Downloaded newer image for docker/sandbox-templates:shell-docker
+INFO: Configuring Docker
+✓ Created sandbox 'sbx-sbx'
+  Workspace: /home/aleksandr/My_Projects/sbx (direct mount)
+  Additional Workspaces: /home/aleksandr/sbx-bridge, /home/aleksandr/My_Projects/sbx/workgroup:ro
+  Agent: shell
+
+To connect to this sandbox, run:
+  sbx run sbx-sbx
+[provision] publishing 127.0.0.1:8560 -> sandbox :8811
+ERROR: publish port: port not available: mapping ports: failed to bind host port 127.0.0.1:8560: address already in use

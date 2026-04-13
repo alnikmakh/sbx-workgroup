@@ -1,0 +1,20 @@
+#!/bin/sh
+# bridge-init <name> --agents a,b,c --edges "a->b,b->c"
+set -eu
+HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/../lib/bridge.sh"
+
+NAME="" AGENTS="" EDGES=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --agents) AGENTS=$2; shift 2;;
+    --edges)  EDGES=$2;  shift 2;;
+    -*) echo "unknown flag: $1" >&2; exit 2;;
+    *) [ -z "$NAME" ] && NAME=$1 || { echo "extra arg: $1" >&2; exit 2; }; shift;;
+  esac
+done
+[ -n "$NAME" ]   || { echo "missing <name>" >&2; exit 2; }
+[ -n "$AGENTS" ] || { echo "missing --agents" >&2; exit 2; }
+[ -n "$EDGES" ]  || { echo "missing --edges"  >&2; exit 2; }
+
+bridge_init "$NAME" "$AGENTS" "$EDGES"

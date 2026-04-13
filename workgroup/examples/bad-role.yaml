@@ -1,0 +1,6 @@
+name: bad-role
+agents:
+  - id: a
+    role: nonexistent-role
+edges: []
+layout: tiled

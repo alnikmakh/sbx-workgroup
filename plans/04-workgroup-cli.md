@@ -57,7 +57,7 @@ workgroup logs   <name> <agent>
 Steps:
 
 1. Parse + validate manifest (`lib/manifest.sh`).
-2. Sanity-check the project's sidecar is reachable from inside the VM: `curl -sS http://127.0.0.1:8811/mcp -o /dev/null`. Fail with a clear message pointing at Phase 01's `provision.sh` if not. **Does not bring the sidecar up** — the sidecar is started by `provision.sh` on the host before the VM is created and is not `workgroup`'s concern.
+2. Sanity-check the project's sidecar is reachable from inside the VM: `curl -sS "http://host.docker.internal:$(cat /etc/workgroup/sidecar-port)/mcp" -o /dev/null`. Fail with a clear message pointing at Phase 01's `provision.sh` if not. **Does not bring the sidecar up** — the sidecar is started by `provision.sh` on the host before the VM is created and is not `workgroup`'s concern. (Earlier drafts of this doc referenced `127.0.0.1:8811`; Phase 01's checkpoint overrode that contract — see `plans/checkpoints/phase-01.md` §2.)
 3. Resolve worktree (`lib/worktree.sh`):
    - default: `git -C /work worktree add /work/worktrees/<name> -b <branch> <base>`.
    - `--worktree PATH`: assert PATH exists and is a valid git worktree; use as-is.

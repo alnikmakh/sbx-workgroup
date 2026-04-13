@@ -1,0 +1,6 @@
+#!/bin/sh
+# bridge-peek — non-destructive full listing of $AGENT_ID's inbox.
+# Thin wrapper: identical to `bridge-recv` with no filters or --pop.
+set -eu
+HERE=$(cd "$(dirname "$0")" && pwd)
+exec "$HERE/bridge-recv"

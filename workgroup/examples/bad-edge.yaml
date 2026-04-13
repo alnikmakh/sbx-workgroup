@@ -1,0 +1,9 @@
+name: bad-edge
+agents:
+  - id: a
+    role: planner
+  - id: b
+    role: reviewer
+edges:
+  - a -> c
+layout: tiled

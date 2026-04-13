@@ -1,0 +1,21 @@
+[provision] ensuring sidecar for 'sbx' is up
+[sidecar-up] starting cgc-sidecar-sbx on 127.0.0.1:8560
+[provision] sidecar bound to 127.0.0.1:8560
+[provision] creating sandbox 'sbx-sbx' (memory=8g)
+INFO: Configuring Docker
+✓ Created sandbox 'sbx-sbx'
+  Workspace: /home/aleksandr/My_Projects/sbx (direct mount)
+  Additional Workspaces: /home/aleksandr/sbx-bridge, /home/aleksandr/My_Projects/sbx/workgroup:ro
+  Agent: shell
+
+To connect to this sandbox, run:
+  sbx run sbx-sbx
+[provision] policy allow network localhost:8560 already present
+[provision] running postinstall inside sandbox
+INFO: Starting Docker daemon
+[postinstall] linked /work -> /home/aleksandr/My_Projects/sbx
+[postinstall] linked /bridge -> /home/aleksandr/sbx-bridge
+[postinstall] linked /opt/workgroup -> /home/aleksandr/My_Projects/sbx/workgroup
+Reading package lists...
+E: Could not get lock /var/lib/apt/lists/lock. It is held by process 1182 (apt-get)
+E: Unable to lock directory /var/lib/apt/lists/

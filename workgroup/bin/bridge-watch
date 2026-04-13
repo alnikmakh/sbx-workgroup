@@ -1,0 +1,45 @@
+#!/bin/sh
+# bridge-watch <name>
+# Tails new signals dropped into $BRIDGE_ROOT/<name>/inbox and prints one line
+# per event. Designed to run in tmux 'watch' window; SIGTERM exits cleanly.
+#
+# Why the FIFO dance instead of `inotifywait ... | while read`:
+# In a pipeline each stage runs in a subshell, so a trap set here can't reach
+# `inotifywait`, and killing the parent shell leaves `inotifywait` orphaned.
+# Running `inotifywait` as a named child writing to a FIFO keeps both the PID
+# and the read loop in this shell, so SIGTERM actually tears the whole thing
+# down. (Caught during Phase 03 in-sandbox verification: the pipeline version
+# hung step 8 forever because `kill $shell_pid` never reached inotifywait.)
+set -eu
+HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/../lib/bridge.sh"
+
+[ $# -ge 1 ] || { echo "usage: bridge-watch <name>" >&2; exit 2; }
+BD=$(bridge_path "$1")
+[ -d "$BD/inbox" ] || { echo "no inbox under $BD" >&2; exit 2; }
+
+FIFO=$(mktemp -u) || exit 1
+mkfifo "$FIFO"
+
+inotifywait -mrq -e create -e moved_to --format '%w %f' "$BD/inbox" > "$FIFO" &
+IW_PID=$!
+
+cleanup() { kill "$IW_PID" 2>/dev/null || true; rm -f "$FIFO"; }
+trap 'cleanup' EXIT
+trap 'exit 0' TERM INT
+
+while read -r dir fname; do
+  case $fname in
+    .*|*.tmp*) continue;;
+    *.json) ;;
+    *) continue;;
+  esac
+  sig="$dir$fname"
+  [ -f "$sig" ] || continue
+  to=$(basename "${dir%/}")
+  from=$(jq -r '.from' "$sig" 2>/dev/null) || continue
+  kind=$(jq -r '.kind' "$sig" 2>/dev/null) || continue
+  subj=$(jq -r '.subject' "$sig" 2>/dev/null) || continue
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  printf '%s NEW %s <- %s: %s "%s"\n' "$ts" "$to" "$from" "$kind" "$subj"
+done < "$FIFO"

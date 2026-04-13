@@ -1,0 +1,8 @@
+name: dup
+agents:
+  - id: a
+    role: planner
+  - id: a
+    role: reviewer
+edges: []
+layout: tiled

@@ -1,0 +1,52 @@
+[provision] ensuring sidecar for 'sbx' is up
+[sidecar-up] already running on 127.0.0.1:8560
+[provision] sidecar bound to 127.0.0.1:8560
+[provision] sandbox 'sbx-sbx' already exists; re-running postinstall (idempotent)
+[provision] policy allow network localhost:8560 already present
+Sandbox sbx-sbx started successfully
+INFO: Starting Docker daemon
+Get:1 http://security.ubuntu.com/ubuntu questing-security InRelease [136 kB]
+Hit:2 http://archive.ubuntu.com/ubuntu questing InRelease
+Hit:3 https://download.docker.com/linux/ubuntu questing InRelease
+Get:4 http://archive.ubuntu.com/ubuntu questing-updates InRelease [136 kB]
+Get:5 http://security.ubuntu.com/ubuntu questing-security/universe amd64 Packages [269 kB]
+Get:6 http://archive.ubuntu.com/ubuntu questing-backports InRelease [133 kB]
+Get:7 http://archive.ubuntu.com/ubuntu questing-updates/universe amd64 Packages [348 kB]
+Get:8 http://archive.ubuntu.com/ubuntu questing-updates/main amd64 Packages [481 kB]
+Fetched 1502 kB in 11s (137 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+tmux is already the newest version (3.5a-3build1).
+git is already the newest version (1:2.51.0-1ubuntu1).
+inotify-tools is already the newest version (4.23.9.0-2).
+jq is already the newest version (1.8.1-3ubuntu1).
+curl is already the newest version (8.14.1-2ubuntu1.2).
+ca-certificates is already the newest version (20250419).
+util-linux is already the newest version (2.41-4ubuntu4.2).
+Solving dependencies...
+0 upgraded, 0 newly installed, 0 to remove and 9 not upgraded.
+[postinstall] packages ok
+[postinstall] attempting claude install (may fail under Balanced policy)
+[postinstall] warning: could not fetch claude installer (claude.ai not in allowlist)
+[postinstall]     to enable, on the host run: sbx policy allow network claude.ai:443
+[postinstall] linked bridge-init -> /opt/workgroup/bin/bridge-init
+[postinstall] linked bridge-peek -> /opt/workgroup/bin/bridge-peek
+[postinstall] linked bridge-recv -> /opt/workgroup/bin/bridge-recv
+[postinstall] linked bridge-send -> /opt/workgroup/bin/bridge-send
+[postinstall] linked bridge-watch -> /opt/workgroup/bin/bridge-watch
+[postinstall] mounts ok
+[postinstall] sidecar reachable at http://host.docker.internal:8560/health
+
+[postinstall] summary
+  tmux:    tmux 3.5a
+  git:     git version 2.51.0
+  jq:      jq-1.8.1
+  yq:      yq (https://github.com/mikefarah/yq/) version v4.52.5
+  claude:  ?
+  mounts:  /home/aleksandr/sbx-bridge /home/aleksandr/My_Projects/sbx/workgroup /home/aleksandr/My_Projects/sbx 
+
+next step (once per Claude session, inside this sandbox):
+  claude mcp add --transport http cgc "http://host.docker.internal:8560/mcp"
+[provision] done. attach with: sbx run sbx-sbx

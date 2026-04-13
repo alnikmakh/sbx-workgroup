@@ -1,0 +1,51 @@
+#!/bin/sh
+# bridge-recv [--kind <k>] [--from <agent>] [--pop <id>]
+# Without --pop: list signals in $BRIDGE_DIR/inbox/$AGENT_ID.
+# With --pop <id>: print payload, move signal JSON to archive/.
+set -eu
+: "${BRIDGE_DIR:?BRIDGE_DIR not set}"
+: "${AGENT_ID:?AGENT_ID not set}"
+HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/../lib/bridge.sh"
+
+FILTER_KIND="" FILTER_FROM="" POP_ID=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --kind) FILTER_KIND=$2; shift 2;;
+    --from) FILTER_FROM=$2; shift 2;;
+    --pop)  POP_ID=$2; shift 2;;
+    *) echo "unknown arg: $1" >&2; exit 2;;
+  esac
+done
+
+INBOX="$BRIDGE_DIR/inbox/$AGENT_ID"
+[ -d "$INBOX" ] || { echo "no inbox: $INBOX" >&2; exit 2; }
+
+if [ -n "$POP_ID" ]; then
+  SIG="$INBOX/$POP_ID.json"
+  [ -f "$SIG" ] || { echo "no such signal: $POP_ID" >&2; exit 2; }
+  PAYLOAD_REL=$(jq -r '.payload' "$SIG")
+  cat "$BRIDGE_DIR/$PAYLOAD_REL"
+  bridge_archive_signal "$BRIDGE_DIR" "$AGENT_ID" "$POP_ID"
+  exit 0
+fi
+
+NOW=$(date -u +%s)
+printf '%-40s  %-10s  %-7s  %5s  %s\n' ID FROM KIND AGE SUBJECT
+any=0
+for f in "$INBOX"/*.json; do
+  [ -f "$f" ] || continue
+  id=$(jq -r '.id' "$f")
+  from=$(jq -r '.from' "$f")
+  kind=$(jq -r '.kind' "$f")
+  subj=$(jq -r '.subject' "$f")
+  ts=$(jq -r '.created_at' "$f")
+  [ -n "$FILTER_KIND" ] && [ "$kind" != "$FILTER_KIND" ] && continue
+  [ -n "$FILTER_FROM" ] && [ "$from" != "$FILTER_FROM" ] && continue
+  # created_at is ISO-8601 Zulu; date -u -d works on GNU coreutils.
+  then=$(date -u -d "$ts" +%s 2>/dev/null || echo "$NOW")
+  age=$((NOW - then))
+  printf '%-40s  %-10s  %-7s  %4ds  %s\n' "$id" "$from" "$kind" "$age" "$subj"
+  any=1
+done
+[ "$any" = 1 ] || echo "(empty)"

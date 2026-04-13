@@ -1,0 +1,6 @@
+name: Feature_X
+agents:
+  - id: planner
+    role: planner
+edges: []
+layout: tiled

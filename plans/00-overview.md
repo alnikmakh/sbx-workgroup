@@ -54,9 +54,13 @@ Every later phase depends on these contracts — and only on these. Changing any
 
 `${projects_root}` and `${cgc_data_root}` come from the per-machine config file `~/.config/sbx-workgroup/machine.yaml` (Phase 02 contract). Nothing committed to this repo encodes an absolute host path.
 
-### Host port forwarding (Phase 02 owns the hash, Phase 01 passes it)
+### Host port + sandbox reachability (Phase 02 owns the hash, Phase 01 opens the path)
 
-Each project's sidecar listens on a hashed host port: `8000 + (crc32(project) mod 1000)`. `machine.yaml` may override any project's port via a `port_overrides:` block. Every VM is created with `sbx create --publish <host-port>:8811`, so inside the VM the endpoint is always `http://127.0.0.1:8811/mcp` regardless of which port the sidecar is actually on.
+Each project's sidecar listens on a hashed host port: `8000 + (crc32(project) mod 1000)`. `machine.yaml` may override any project's port via a `port_overrides:` block.
+
+`sbx` sandboxes reach the host via the gateway name `host.docker.internal`, with all outbound HTTP routed through a policy-enforcing proxy at `gateway.docker.internal:3128` (set in `HTTP_PROXY`/`HTTPS_PROXY`; `NO_PROXY=localhost,127.0.0.1,::1`). Phase 01's `provision.sh` opens the path with `sbx policy allow network localhost:<host-port>` — the proxy canonicalizes `host.docker.internal:<port>` to `localhost:<port>`, so that one allow rule is what lets the sandbox reach the sidecar. `sbx ports --publish` is **not** used: it is inbound (host → sandbox) and points the wrong direction.
+
+In-sandbox MCP endpoint: `http://host.docker.internal:<host-port>/mcp`. The hashed port is passed into the sandbox as the `SIDECAR_PORT` env var at postinstall time and recorded in `/etc/workgroup/sidecar-port` so Phase 04 can read it when constructing `claude mcp add`.
 
 ### Sidecar lifecycle contract (Phase 02 provides, Phase 01 drives)
 
@@ -125,10 +129,10 @@ Allowed values of `kind`: `plan`, `report`, `note`. These map one-to-one to the 
 
 ### MCP endpoint (Phase 02)
 
-`http://127.0.0.1:8811/mcp` — served by the **project's host-side sidecar**, reached from inside the VM via `sbx create --publish <host-port>:8811`. Registered in each Claude session once with:
+`http://host.docker.internal:<host-port>/mcp` — served by the **project's host-side sidecar**, reached from inside the sandbox through the policy-gated HTTP proxy (allow rule added by `provision.sh`). The hashed host port is available inside the sandbox as `$SIDECAR_PORT` and at `/etc/workgroup/sidecar-port`. Registered in each Claude session once with:
 
 ```
-claude mcp add --transport http cgc http://127.0.0.1:8811/mcp
+claude mcp add --transport http cgc "http://host.docker.internal:$(cat /etc/workgroup/sidecar-port)/mcp"
 ```
 
 One project = one VM = one sidecar = one cgc process = one DB. Inside the VM, arbitrarily many Claude sessions (across arbitrarily many workgroups) all share that single cgc process through the sidecar's multiplexer. Cross-project visibility doesn't exist and isn't needed — each VM only ever talks to its own project's cgc index.
