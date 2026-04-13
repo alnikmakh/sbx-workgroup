@@ -101,18 +101,59 @@ log "packages ok"
 # than hard-failing, we attempt and warn. Users who want claude in-sandbox
 # need: `sbx policy allow network claude.ai:443` on the host, then re-run
 # provision.sh.
-if need claude; then
-    log "claude already installed: $(claude --version 2>/dev/null || echo '?')"
+#
+# Runs as the sandbox runtime user (agent, uid 1000), not root: the installer
+# drops the binary in $HOME/.local/bin, and $HOME must be the agent's home or
+# `sbx run` sessions won't find it. The installer shebang is /bin/bash and
+# uses `[[ ... ]]`, so we must invoke it via bash, not sh (which is dash on
+# ubuntu and errors out at line 9).
+sbx_user="$(getent passwd 1000 2>/dev/null | cut -d: -f1)"
+: "${sbx_user:=agent}"
+sbx_user_home="$(getent passwd "$sbx_user" 2>/dev/null | cut -d: -f6)"
+: "${sbx_user_home:=/home/$sbx_user}"
+as_sbx_user() {
+    # runuser ships in util-linux (already installed above).
+    runuser -u "$sbx_user" -- env HOME="$sbx_user_home" PATH="$sbx_user_home/.local/bin:/usr/local/bin:/usr/bin:/bin" "$@"
+}
+
+if as_sbx_user sh -c 'command -v claude >/dev/null 2>&1'; then
+    log "claude already installed for $sbx_user: $(as_sbx_user claude --version 2>/dev/null || echo '?')"
 else
-    log "attempting claude install (may fail under Balanced policy)"
+    log "attempting claude install for $sbx_user (may fail under Balanced policy)"
     installer="$(mktemp)"
+    chmod 0644 "$installer"
     if curl -fsSL https://claude.ai/install.sh -o "$installer" 2>/dev/null; then
-        sh "$installer" || log "warning: claude install script failed"
+        if as_sbx_user bash "$installer"; then
+            log "claude installed for $sbx_user"
+        else
+            log "warning: claude install script failed"
+        fi
     else
         log "warning: could not fetch claude installer (claude.ai not in allowlist)"
         log "    to enable, on the host run: sbx policy allow network claude.ai:443"
     fi
     rm -f "$installer"
+fi
+
+# -- 2a. Register cgc MCP server at user scope (as the sandbox runtime user) --
+# Every `workgroup up` worktree (/work/worktrees/<name>) is a distinct claude
+# project, so per-project registration doesn't reach role-injected panes.
+# Registering at --scope user makes cgc available in every project directory
+# without a per-pane `claude mcp add` step. Writes to $sbx_user_home/.claude.json
+# via the as_sbx_user helper defined in step 2.
+if as_sbx_user sh -c 'command -v claude >/dev/null 2>&1'; then
+    as_sbx_user claude mcp remove cgc --scope user >/dev/null 2>&1 || true
+    if as_sbx_user claude mcp add --transport http --scope user cgc \
+            "http://host.docker.internal:${SIDECAR_PORT}/mcp" >/dev/null 2>&1; then
+        log "registered cgc MCP server at user scope for $sbx_user"
+        cgc_status="registered at user scope -> http://host.docker.internal:${SIDECAR_PORT}/mcp"
+    else
+        log "warning: failed to register cgc MCP server as $sbx_user"
+        cgc_status="FAILED to register (see warning above)"
+    fi
+else
+    log "skipping cgc MCP registration (claude not installed for $sbx_user)"
+    cgc_status="SKIPPED (claude not installed for $sbx_user)"
 fi
 
 # -- 3. Symlink workgroup/bridge binaries onto PATH ---------------------------
@@ -157,9 +198,7 @@ cat >&2 <<EOF
   git:     $(git --version 2>/dev/null || echo '?')
   jq:      $(jq --version 2>/dev/null || echo '?')
   yq:      $(yq --version 2>/dev/null || echo '?')
-  claude:  $(claude --version 2>/dev/null || echo '?')
+  claude:  $(as_sbx_user claude --version 2>/dev/null || echo '?')
   mounts:  $(ls -ld /work /bridge /opt/workgroup | awk '{print $NF}' | tr '\n' ' ')
-
-next step (once per Claude session, inside this sandbox):
-  claude mcp add --transport http cgc "http://host.docker.internal:${SIDECAR_PORT}/mcp"
+  cgc mcp: ${cgc_status}
 EOF

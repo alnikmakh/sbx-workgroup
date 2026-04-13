@@ -50,7 +50,7 @@ tmux_send_launch() {
   # unset ANTHROPIC_API_KEY: sbx bakes ANTHROPIC_API_KEY=proxy-managed into
   # pid 1, which claude mistakes for a real key and rejects, masking the
   # OAuth creds set up by `claude /login`. Drop it for this pane only.
-  _cmd="cd $(_tx_q "$_cwd") && unset ANTHROPIC_API_KEY && BRIDGE_DIR=$(_tx_q "$_bd") AGENT_ID=$(_tx_q "$_ag") AGENT_PEERS_OUT=$(_tx_q "$_out") AGENT_PEERS_IN=$(_tx_q "$_in") claude --append-system-prompt \"\$(cat $(_tx_q "$_role"))\""
+  _cmd="cd $(_tx_q "$_cwd") && unset ANTHROPIC_API_KEY && BRIDGE_DIR=$(_tx_q "$_bd") AGENT_ID=$(_tx_q "$_ag") AGENT_PEERS_OUT=$(_tx_q "$_out") AGENT_PEERS_IN=$(_tx_q "$_in") claude --dangerously-skip-permissions --append-system-prompt \"\$(cat $(_tx_q "$_role"))\""
   tmux send-keys -t "$_sess:agents.$_idx" "$_cmd" C-m
 }
 

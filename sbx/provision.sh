@@ -149,6 +149,5 @@ cat >&2 <<EOF
   sandbox:     $vm_name
   sidecar:     http://host.docker.internal:$port (via HTTP proxy + policy allow)
   attach:      sbx run $vm_name
-  one-time in each Claude session inside the sandbox:
-               claude mcp add --transport http cgc "http://host.docker.internal:$port/mcp"
+  cgc mcp:     registered at user scope by postinstall (no per-session step)
 EOF

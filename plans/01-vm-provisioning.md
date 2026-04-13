@@ -25,7 +25,7 @@ Responsibilities:
    - The `shell` agent is used (not `claude`) — we run tmux + multiple claude panes ourselves in Phase 04, so the sandbox must not auto-launch an agent.
 7a. `sbx ports <name> --publish 127.0.0.1:${port}:8811` — publishes the sidecar's hashed host port to the sandbox's fixed guest port 8811. `sbx` does not accept `--publish` at create time; it is a separate post-create subcommand.
 8. On first-boot success: `sbx exec -u root -e WORK_SRC=... -e BRIDGE_SRC=... -e WORKGROUP_SRC=... <name> <repo>/workgroup/etc/postinstall.sh`. The env vars tell postinstall the real host paths so it can materialize the `/work`, `/bridge`, `/opt/workgroup` symlinks. The postinstall script is invoked by its real host path because `/opt/workgroup` does not exist until it has run at least once.
-9. Print the `sbx run <name>` command the user should use next and the one-time `claude mcp add` line.
+9. Print the `sbx run <name>` command the user should use next. (cgc MCP registration is done by `postinstall.sh` at user scope — no per-session `claude mcp add` step is needed.)
 
 Idempotency: re-running `provision.sh` on an already-provisioned sandbox is safe — it detects the sandbox, skips `sbx create shell` + `sbx ports`, re-runs `postinstall.sh` (idempotent), and exits 0. The sidecar check at step 5 is always run and is itself idempotent.
 
@@ -51,8 +51,9 @@ Responsibilities:
 2. Install Claude Code (follow the official install instructions for the sandbox's distro).
 3. Symlink `/opt/workgroup/bin/*` onto PATH (into `/usr/local/bin`): `workgroup`, `bridge-send`, `bridge-recv`, `bridge-peek`, `bridge-watch`, `bridge-init`. Empty-bin is a graceful no-op until Phases 03/04 populate it.
 4. Ensure `/work` and `/bridge` are present and writable.
-5. Sanity-check sidecar reachability: `curl -sS http://127.0.0.1:8811/mcp -o /dev/null` (or `/health` as a fallback probe) must succeed (proves the `sbx ports --publish <host-port>:8811` forwarding lands on the project's sidecar). Fail postinstall with a clear message if not.
-6. Print a summary: package versions, mount listing, gateway reachability, and the one-time `claude mcp add` command the user should run next.
+5. Sanity-check sidecar reachability: `curl -sS http://host.docker.internal:${SIDECAR_PORT}/health -o /dev/null` (or `/mcp` as a fallback probe) must succeed (proves the `sbx policy allow network localhost:<host-port>` rule + HTTP proxy land on the project's sidecar). Fail postinstall with a clear message if not.
+5a. Register cgc with Claude Code at user scope: `claude mcp add --transport http --scope user cgc "http://host.docker.internal:${SIDECAR_PORT}/mcp"` (preceded by an idempotent `claude mcp remove cgc --scope user`). User scope makes the server available in every project directory — each `workgroup up` worktree is a distinct claude project, so per-project registration would miss role-injected panes. Idempotent on re-run.
+6. Print a summary: package versions, mount listing, gateway reachability, and confirmation that cgc is registered.
 
 Idempotent: every step is guarded so re-running just reports "already installed" for done work.
 
@@ -91,5 +92,5 @@ Short, host-facing: prerequisites, `./sbx/provision.sh` usage, how to tear down 
 
 - Default sandbox memory. Starting: `8g` via `sbx create --memory 8g`. `sbx` does not expose `--cpus` or `--disk`; CPU is a fraction of host and disk is managed by the sandbox runtime. Revisit memory after first real workload — can likely drop now that cgc runs on the host instead of in the sandbox.
 - Whether to pin the sandbox base image via `sbx create --template`. Starting assumption: whatever the `shell` agent's default image is, as long as it has a supported Claude Code install path. If it doesn't, pass `--template` to a Debian-based alternative.
-- Whether `postinstall.sh` should also run `claude mcp add --transport http cgc ...` on behalf of the user. Starting: no (per-user Claude config).
+- ~~Whether `postinstall.sh` should also run `claude mcp add --transport http cgc ...` on behalf of the user.~~ Resolved: yes, at user scope (`--scope user`). Every `workgroup up` worktree is its own claude project, so per-project registration doesn't reach role-injected panes — user scope is the only form that propagates.
 - Default sandbox network policy. `sbx login` requires the user to pick a default policy (Open / Balanced / Locked Down). Package install + Claude Code install + `claude mcp add` all need outbound HTTPS to a small set of hosts — if the user picked Locked Down, `provision.sh` may need to allowlist those hosts via `sbx policy` before `postinstall.sh` runs.

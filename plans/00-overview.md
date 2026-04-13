@@ -28,7 +28,8 @@ Host (Linux or macOS)
     ├── packages: claude-code, tmux, git, inotify-tools, yq, jq, flock
     │             (no docker in the VM — MCP stack lives on host)
     │
-    ├── one-time: claude mcp add --transport http cgc http://127.0.0.1:8811/mcp
+    ├── postinstall: claude mcp add --transport http --scope user cgc \
+    │                   http://host.docker.internal:$SIDECAR_PORT/mcp
     │
     └── tmux
         ├── session "feature-a"   ← workgroup A
@@ -129,10 +130,10 @@ Allowed values of `kind`: `plan`, `report`, `note`. These map one-to-one to the 
 
 ### MCP endpoint (Phase 02)
 
-`http://host.docker.internal:<host-port>/mcp` — served by the **project's host-side sidecar**, reached from inside the sandbox through the policy-gated HTTP proxy (allow rule added by `provision.sh`). The hashed host port is available inside the sandbox as `$SIDECAR_PORT` and at `/etc/workgroup/sidecar-port`. Registered in each Claude session once with:
+`http://host.docker.internal:<host-port>/mcp` — served by the **project's host-side sidecar**, reached from inside the sandbox through the policy-gated HTTP proxy (allow rule added by `provision.sh`). The hashed host port is available inside the sandbox as `$SIDECAR_PORT` and at `/etc/workgroup/sidecar-port`. Registered once at sandbox bring-up by `postinstall.sh` at user scope, so every `workgroup up` worktree inherits the server without a per-session step:
 
 ```
-claude mcp add --transport http cgc "http://host.docker.internal:$(cat /etc/workgroup/sidecar-port)/mcp"
+claude mcp add --transport http --scope user cgc "http://host.docker.internal:$(cat /etc/workgroup/sidecar-port)/mcp"
 ```
 
 One project = one VM = one sidecar = one cgc process = one DB. Inside the VM, arbitrarily many Claude sessions (across arbitrarily many workgroups) all share that single cgc process through the sidecar's multiplexer. Cross-project visibility doesn't exist and isn't needed — each VM only ever talks to its own project's cgc index.

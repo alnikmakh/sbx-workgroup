@@ -93,7 +93,7 @@ Sidecar port for this project: `8560` (`8000 + crc32("sbx") mod 1000`).
 | 4. `command -v workgroup && command -v bridge-send` | ⏸ deferred — `workgroup/bin/` empty until Phase 03/04 |
 | 5. Re-run `provision.sh` — detects existing sandbox, re-runs postinstall, exits 0 | ✅ (runs 2 and 3 of the session) |
 | 6. `teardown.sh` — `sbx rm` + `sidecar-down.sh`; `${cgc_data_root}/sbx/` preserved | ✅ |
-| 7. End-to-end `claude mcp add` → `claude mcp list` → cgc tool call | ⏸ deferred — claude install blocked by Balanced policy (see below) |
+| 7. End-to-end `claude mcp add` → `claude mcp list` → cgc tool call | ⏸ deferred — claude install blocked by Balanced policy (see below). Superseded 2026-04-13: `postinstall.sh` now registers cgc at user scope (`--scope user`), so this is no longer a per-session manual step. Re-verify under Phase 06 §10. |
 
 Cold-start run (sandbox and sidecar both absent) also verified.
 
