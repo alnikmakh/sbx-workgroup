@@ -197,8 +197,10 @@ cmd_down() {
 
   if [ "$_force" = 1 ]; then
     if [ -d "$_wt" ]; then
-      worktree_remove_if_clean "$_wt"
-      _rc=$?
+      # `set -e` would abort here on a non-zero return before we could read
+      # $? and dispatch to the friendly error messages below — guard with ||.
+      _rc=0
+      worktree_remove_if_clean "$_wt" || _rc=$?
       case $_rc in
         0) printf 'removed worktree: %s\n' "$_wt" ;;
         1) die "worktree $_wt has uncommitted changes; commit or stash first" ;;
