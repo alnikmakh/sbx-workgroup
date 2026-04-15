@@ -145,7 +145,7 @@ cmd_up() {
 
   # Build tmux session + launch panes.
   # shellcheck disable=SC2086
-  tmux_create_session "$WG_NAME" "$WG_LAYOUT" $(printf '%s' "$WG_AGENTS" | tr ',' ' ') \
+  tmux_create_session "$WG_NAME" "$WG_LAYOUT" "$_bd" $(printf '%s' "$WG_AGENTS" | tr ',' ' ') \
     || die "tmux create failed"
   tmux_add_watch_window "$WG_NAME" "$WG_NAME" || die "watch window failed"
 
@@ -310,9 +310,10 @@ cmd_logs() {
   [ $# -eq 2 ] || die "logs: <name> <agent> required"
   _name=$1 _ag=$2
   tmux_session_exists "$_name" || die "no such session: $_name"
-  _idx=$(tmux_pane_index_for_agent "$_name" "$_ag")
-  [ -n "$_idx" ] || die "no pane titled '$_ag' in session '$_name'"
-  tmux capture-pane -t "$_name:agents.$_idx" -p -S -3000
+  _bd=$(bridge_path "$_name")
+  _pid=$(tmux_pane_id_for_agent "$_bd" "$_ag")
+  [ -n "$_pid" ] || die "no pane for agent '$_ag' in session '$_name'"
+  tmux capture-pane -t "$_pid" -p -S -3000
 }
 
 main() {
