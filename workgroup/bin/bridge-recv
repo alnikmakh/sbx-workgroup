@@ -5,8 +5,9 @@
 set -eu
 : "${BRIDGE_DIR:?BRIDGE_DIR not set}"
 : "${AGENT_ID:?AGENT_ID not set}"
-SELF=$(readlink -f -- "$0" 2>/dev/null || printf %s "$0")
-HERE=$(cd "$(dirname "$SELF")" && pwd)
+_p=$0
+while [ -L "$_p" ]; do _d=$(cd "$(dirname "$_p")" && pwd -P); _l=$(readlink "$_p"); case $_l in /*) _p=$_l ;; *) _p="$_d/$_l" ;; esac; done
+HERE=$(cd "$(dirname "$_p")" && pwd -P)
 . "$HERE/../lib/bridge.sh"
 
 FILTER_KIND="" FILTER_FROM="" POP_ID=""

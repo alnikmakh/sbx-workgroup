@@ -4,23 +4,16 @@
 #   explicit → use user-supplied path, assert it is a valid worktree
 #   none     → use /work directly (with a warning about concurrent writes)
 #
-# $WORK_ROOT (default /work) lets tests point at a scratch repo.
+# $WORK_ROOT must be set by the caller (bin/workgroup resolves it from the
+# manifest, --source flag, or cwd before calling us). Tests set it explicitly.
 # $WORKTREE_ROOT is where default-mode worktrees live — outside $WORK_ROOT so
-# cgc indexing of /work doesn't see a duplicate copy of the repo. Resolution:
-#   1. Env var already set (tests, explicit override).
-#   2. /etc/workgroup/worktree-root, populated by postinstall.sh from the
-#      host-mounted ~/sbx-worktrees/<project> directory.
-#   3. Fallback to $WORK_ROOT/worktrees (legacy — keeps tests green and
-#      non-sandbox runs working, at the cost of the cgc-duplication bug).
+# any indexer pointed at $WORK_ROOT doesn't see a duplicate copy of the repo.
+# Resolution: env var (set by lib/config.sh from $WORKGROUP_HOME or the user's
+# config.yaml), else $WORK_ROOT/worktrees as a last-resort fallback so this
+# library remains usable when sourced standalone.
 
-: "${WORK_ROOT:=/work}"
-if [ -z "${WORKTREE_ROOT:-}" ]; then
-    if [ -r /etc/workgroup/worktree-root ]; then
-        WORKTREE_ROOT=$(cat /etc/workgroup/worktree-root)
-    else
-        WORKTREE_ROOT="$WORK_ROOT/worktrees"
-    fi
-fi
+: "${WORK_ROOT:=}"
+: "${WORKTREE_ROOT:=${WORK_ROOT:+$WORK_ROOT/worktrees}}"
 
 _wt_die() { echo "worktree: $*" >&2; return 1; }
 
@@ -78,9 +71,11 @@ worktree_resolve() {
 
 worktree_remove_if_clean() {
   # $1 = path. Returns 0 if removed, 1 if dirty, 2 if not a worktree.
+  # Runs `git worktree remove` from inside the worktree itself so we don't
+  # need WORK_ROOT — the worktree knows its parent via .git's gitdir.
   _p=$1
   git -C "$_p" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 2
   _dirty=$(git -C "$_p" status --porcelain)
   [ -z "$_dirty" ] || return 1
-  git -C "$WORK_ROOT" worktree remove "$_p" >&2
+  git -C "$_p" worktree remove "$_p" >&2
 }

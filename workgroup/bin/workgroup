@@ -1,29 +1,44 @@
 #!/bin/sh
-# Phase 04 dispatcher. POSIX sh. Sources lib/{manifest,worktree,tmux,bridge}.sh.
+# Standalone workgroup dispatcher. POSIX sh. Sources lib/{config,manifest,
+# worktree,tmux,bridge}.sh.
 set -eu
 
-_self=$(readlink -f -- "$0" 2>/dev/null || printf %s "$0")
-_here=$(CDPATH='' cd -- "$(dirname -- "$_self")" && pwd)
-# /opt/workgroup/bin/workgroup → /opt/workgroup/lib; but during dev or tests we
-# may be invoked from the repo, in which case ../lib resolves the same way.
-# readlink -f resolves the /usr/local/bin/workgroup symlink written by
-# postinstall.sh so ../lib lands inside /opt/workgroup, not /usr/local.
+# Portable symlink-resolving script-dir. POSIX `pwd -P` + manual readlink loop
+# replaces GNU `readlink -f` so this works on macOS without coreutils.
+_resolve_dir() {
+  _p=$1
+  while [ -L "$_p" ]; do
+    _d=$(cd "$(dirname "$_p")" && pwd -P)
+    _l=$(readlink "$_p")
+    case $_l in
+      /*) _p=$_l ;;
+      *)  _p="$_d/$_l" ;;
+    esac
+  done
+  cd "$(dirname "$_p")" && pwd -P
+}
+_here=$(_resolve_dir "$0")
 _lib="$_here/../lib"
 # shellcheck source=/dev/null
+. "$_lib/config.sh"
+# shellcheck source=/dev/null
 . "$_lib/manifest.sh"
+# shellcheck source=/dev/null
+. "$_lib/bridge.sh"
 # shellcheck source=/dev/null
 . "$_lib/worktree.sh"
 # shellcheck source=/dev/null
 . "$_lib/tmux.sh"
-# shellcheck source=/dev/null
-. "$_lib/bridge.sh"
 
-: "${BRIDGE_ROOT:=/bridge}"
-: "${WORK_ROOT:=/work}"
-: "${WORKGROUP_ROOT:=/opt/workgroup}"
-if [ -z "${WORKTREE_ROOT:-}" ] && [ -r /etc/workgroup/worktree-root ]; then
-    WORKTREE_ROOT=$(cat /etc/workgroup/worktree-root)
-fi
+# WORKGROUP_ROOT = the CLI payload root (parent of bin/, lib/, templates/).
+# Resolved from the script's own location so a clone-and-run install works.
+: "${WORKGROUP_ROOT:=$(cd "$_here/.." && pwd -P)}"
+
+# Load config + apply XDG defaults for $BRIDGE_ROOT, $WORKTREE_ROOT,
+# $WORKGROUP_HOME, optional $WORKGROUP_PROJECTS_ROOT, $WORKGROUP_MCP_BLOCK.
+# Tests that pre-set BRIDGE_ROOT/WORKTREE_ROOT keep working — config_load uses
+# `:${var:=…}` so existing values win.
+config_load
 
 die() { echo "workgroup: $*" >&2; exit 1; }
 
@@ -31,21 +46,23 @@ usage() {
   cat <<'EOF'
 usage: workgroup <command> [args]
 
-  up <file.yaml> [--worktree PATH] [--no-worktree]
+  up <file.yaml> [--worktree PATH] [--no-worktree] [--source PATH]
   down <name> [--force]
   ls
   attach <name>
   status <name>
   logs <name> <agent>
+  doctor
 EOF
 }
 
 cmd_up() {
-  _file='' _wt_mode=default _wt_path=''
+  _file='' _wt_mode=default _wt_path='' _src=''
   while [ $# -gt 0 ]; do
     case $1 in
       --worktree) _wt_mode=explicit; _wt_path=${2:-}; shift 2 ;;
       --no-worktree) _wt_mode=none; shift ;;
+      --source) _src=${2:-}; shift 2 ;;
       -h|--help) usage; return 0 ;;
       -*) die "up: unknown flag $1" ;;
       *) [ -z "$_file" ] && _file=$1 || die "up: extra arg $1"; shift ;;
@@ -59,15 +76,34 @@ cmd_up() {
   tmux_session_exists "$WG_NAME" \
     && die "session '$WG_NAME' already exists — attach with 'workgroup attach $WG_NAME' or remove with 'workgroup down $WG_NAME'"
 
-  # Sidecar sanity check. Endpoint per Phase 01 checkpoint: host.docker.internal
-  # with port from /etc/workgroup/sidecar-port. Skip silently if we're not in
-  # the sandbox (file absent) — the dev/test path doesn't need it.
-  if [ -f /etc/workgroup/sidecar-port ]; then
-    _port=$(cat /etc/workgroup/sidecar-port)
-    _url="http://host.docker.internal:$_port/mcp"
-    curl -sS -o /dev/null --max-time 3 "$_url" \
-      || die "sidecar not reachable at $_url — rerun sbx/provision.sh on the host"
+  # Resolve WORK_ROOT (the source repo the worktree is forked from).
+  # Order: --source flag → manifest's worktree.source → existing $WORK_ROOT
+  # (tests, sbx mode) → manifest dir if it's inside a git repo → cwd if
+  # it's a git repo → $WORKGROUP_PROJECTS_ROOT/<name>.
+  if [ -n "$_src" ]; then
+    WORK_ROOT=$_src
+  elif [ -n "${WG_SOURCE:-}" ]; then
+    WORK_ROOT=$WG_SOURCE
+  elif [ -n "${WORK_ROOT:-}" ]; then
+    : # already set (tests, sbx postinstall)
+  else
+    _mdir=$(cd "$(dirname "$_file")" && pwd -P)
+    if git -C "$_mdir" rev-parse --show-toplevel >/dev/null 2>&1; then
+      WORK_ROOT=$(git -C "$_mdir" rev-parse --show-toplevel)
+    elif git -C "$PWD" rev-parse --show-toplevel >/dev/null 2>&1; then
+      WORK_ROOT=$(git -C "$PWD" rev-parse --show-toplevel)
+    elif [ -n "${WORKGROUP_PROJECTS_ROOT:-}" ] && [ -d "$WORKGROUP_PROJECTS_ROOT/$WG_NAME" ]; then
+      WORK_ROOT="$WORKGROUP_PROJECTS_ROOT/$WG_NAME"
+    else
+      die "up: could not resolve source repo — pass --source PATH, set worktree.source in the manifest, or run inside a git checkout"
+    fi
   fi
+  export WORK_ROOT
+  # Reset WORKTREE_ROOT default *after* WORK_ROOT is known if config didn't
+  # supply one. config_load may have left it unset when neither env nor config
+  # provided a value AND we're outside the sbx VM.
+  : "${WORKTREE_ROOT:=$WORKGROUP_HOME/worktrees}"
+  export WORKTREE_ROOT
 
   _wt=$(worktree_resolve "$WG_NAME" "$_wt_mode" "$WG_BRANCH" "$WG_BASE" "$_wt_path") || exit 1
 
@@ -75,15 +111,29 @@ cmd_up() {
   bridge_init "$WG_NAME" "$WG_AGENTS" "$WG_EDGES" || die "bridge_init failed"
   _bd=$(bridge_path "$WG_NAME")
 
-  # Populate state.json fields Phase 04 owns.
+  # Populate state.json fields the dispatcher owns.
   _state="$_bd/state.json"
-  (
-    flock 9
-    _tmp="$_state.new.$$"
-    jq --arg wt "$_wt" --arg br "$WG_BRANCH" \
-       '.worktree=$wt | .branch=$br' "$_state" > "$_tmp"
-    mv "$_tmp" "$_state"
-  ) 9>"$_state.lock"
+  _state_branch=$WG_BRANCH _state_wt=$_wt _state_path=$_state
+  _update_state_body() {
+    _tmp="$_state_path.new.$$"
+    jq --arg wt "$_state_wt" --arg br "$_state_branch" \
+       '.worktree=$wt | .branch=$br' "$_state_path" > "$_tmp"
+    mv "$_tmp" "$_state_path"
+  }
+  locked_subshell "$_state.lock" _update_state_body
+
+  # Optional MCP server registration. Reads $WORKGROUP_MCP_BLOCK (set by
+  # config_load from config.yaml's `mcp:` list, TSV: name<TAB>transport<TAB>url).
+  # Failures are warnings, not fatal — the workgroup is still useful without
+  # the index. Skipped silently if claude is not on PATH (test stubs etc).
+  if [ -n "${WORKGROUP_MCP_BLOCK:-}" ] && command -v claude >/dev/null 2>&1; then
+    printf '%s\n' "$WORKGROUP_MCP_BLOCK" | while IFS='	' read -r _mn _mt _mu; do
+      [ -n "$_mn" ] && [ -n "$_mu" ] || continue
+      claude mcp add --transport "${_mt:-http}" --scope user "$_mn" "$_mu" \
+        >/dev/null 2>&1 \
+        || printf 'workgroup: warning: failed to register MCP server %s (%s)\n' "$_mn" "$_mu" >&2
+    done
+  fi
 
   # Copy role briefings into the bridge.
   _old=${IFS- }; IFS=','
@@ -213,6 +263,49 @@ cmd_status() {
   done
 }
 
+cmd_doctor() {
+  _bad=0
+  printf 'workgroup doctor\n'
+  printf '  WORKGROUP_ROOT       %s\n' "$WORKGROUP_ROOT"
+  printf '  WORKGROUP_HOME       %s\n' "$WORKGROUP_HOME"
+  printf '  BRIDGE_ROOT          %s\n' "$BRIDGE_ROOT"
+  printf '  WORKTREE_ROOT        %s\n' "$WORKTREE_ROOT"
+  printf '  WORKGROUP_CONFIG     %s%s\n' "$WORKGROUP_CONFIG" \
+    "$( [ -f "$WORKGROUP_CONFIG" ] && printf ' (present)' || printf ' (absent, using defaults)' )"
+  printf '\ndependencies:\n'
+  for _d in tmux git jq yq claude; do
+    if command -v "$_d" >/dev/null 2>&1; then
+      printf '  %-8s OK   %s\n' "$_d" "$(command -v "$_d")"
+    else
+      case $_d in
+        claude) printf '  %-8s MISS (optional — needed only to launch agent panes)\n' "$_d" ;;
+        *)      printf '  %-8s MISS\n' "$_d"; _bad=1 ;;
+      esac
+    fi
+  done
+  if command -v flock >/dev/null 2>&1; then
+    printf '  flock    OK   %s\n' "$(command -v flock)"
+  else
+    printf '  flock    MISS (using mkdir-lock fallback — fine on macOS)\n'
+  fi
+  if command -v inotifywait >/dev/null 2>&1; then
+    printf '  inotifywait OK (watch window will work)\n'
+  else
+    printf '  inotifywait MISS (watch window unavailable — install inotify-tools or fswatch wrapper)\n'
+  fi
+  # yq flavor sniff: Mike Farah's Go yq prints "yq (https://github.com/mikefarah/yq/)" with --version.
+  if command -v yq >/dev/null 2>&1; then
+    if yq --version 2>&1 | grep -q mikefarah; then
+      printf '\nyq flavor: go-yq (mikefarah) — correct\n'
+    else
+      printf '\nyq flavor: NOT mikefarah/yq — install go-yq (brew install yq)\n'
+      _bad=1
+    fi
+  fi
+  printf '\n%s\n' "$( [ "$_bad" -eq 0 ] && printf 'all required dependencies present' || printf 'missing required dependencies above' )"
+  return "$_bad"
+}
+
 cmd_logs() {
   [ $# -eq 2 ] || die "logs: <name> <agent> required"
   _name=$1 _ag=$2
@@ -232,6 +325,7 @@ main() {
     attach) cmd_attach "$@" ;;
     status) cmd_status "$@" ;;
     logs)   cmd_logs   "$@" ;;
+    doctor) cmd_doctor "$@" ;;
     -h|--help|help) usage ;;
     *) die "unknown subcommand: $_sub" ;;
   esac

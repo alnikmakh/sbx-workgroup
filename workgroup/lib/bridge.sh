@@ -1,11 +1,48 @@
 #!/bin/sh
-# Phase 03 bridge primitives. POSIX sh + jq + flock. No fsync; same-FS rename
-# gives atomic visibility, which is all v1 needs (see plans/03-bridge-protocol.md).
+# Phase 03 bridge primitives. POSIX sh + jq + locked_subshell. No fsync;
+# same-FS rename gives atomic visibility, which is all v1 needs (see
+# plans/03-bridge-protocol.md).
 #
 # Library functions are positional; the bin/ wrappers parse flags and call in.
-# $BRIDGE_ROOT (default /bridge) lets tests point at a scratch dir.
+# $BRIDGE_ROOT must be set by the caller (bin/workgroup sources lib/config.sh
+# which exports it). Tests set it explicitly to a scratch dir. We fall back to
+# $HOME/.local/share/workgroup/bridges only as a last resort so direct callers
+# of this library don't crash on an unset var.
 
-: "${BRIDGE_ROOT:=/bridge}"
+: "${BRIDGE_ROOT:=${XDG_DATA_HOME:-$HOME/.local/share}/workgroup/bridges}"
+
+# locked_subshell <lockfile> <fn>: run <fn> in a subshell holding an exclusive
+# lock on <lockfile>. Linux uses flock(1); macOS (no flock) falls back to an
+# atomic mkdir-of-sibling-dir with EXIT-trap cleanup. Inlined here rather than
+# split into its own file so test scripts that source bridge.sh directly don't
+# need a separate include path. Used by both bridge.sh and bin/workgroup.
+if command -v flock >/dev/null 2>&1; then
+  locked_subshell() {
+    _lk=$1; _fn=$2
+    (
+      flock 9
+      "$_fn"
+    ) 9>"$_lk"
+  }
+else
+  locked_subshell() {
+    _lk=$1; _fn=$2
+    (
+      _ld="${_lk}.d"
+      _tries=0
+      while ! mkdir "$_ld" 2>/dev/null; do
+        _tries=$((_tries + 1))
+        if [ "$_tries" -gt 600 ]; then
+          echo "lock: timed out waiting for $_ld (30s)" >&2
+          exit 1
+        fi
+        sleep 0.05 2>/dev/null || sleep 1
+      done
+      trap 'rmdir "$_ld" 2>/dev/null || true' EXIT INT TERM
+      "$_fn"
+    )
+  }
+fi
 
 bridge_path() {
   # $1 = workgroup name (or absolute path); resolve to a bridge dir.
@@ -62,17 +99,17 @@ bridge_topology_allows() {
     "$_bd/state.json" >/dev/null
 }
 
+_bridge_next_id_body() {
+  _cur=$(cat "$_bd/.counters/$_ag" 2>/dev/null)
+  _cur=${_cur:-0}
+  _next=$((_cur + 1))
+  printf '%s' "$_next" > "$_bd/.counters/$_ag"
+  printf '%s-%s-%03d' "$(date -u +%Y-%m-%dT%H-%M-%SZ)" "$_ag" "$_next"
+}
 bridge_next_signal_id() {
   # $1 = bridge dir (or name), $2 = agent
   _bd=$(bridge_path "$1"); _ag=$2
-  (
-    flock 9
-    _cur=$(cat "$_bd/.counters/$_ag" 2>/dev/null)
-    _cur=${_cur:-0}
-    _next=$((_cur + 1))
-    printf '%s' "$_next" > "$_bd/.counters/$_ag"
-    printf '%s-%s-%03d' "$(date -u +%Y-%m-%dT%H-%M-%SZ)" "$_ag" "$_next"
-  ) 9>"$_bd/state.json.lock"
+  locked_subshell "$_bd/state.json.lock" _bridge_next_id_body
 }
 
 bridge_atomic_write() {

@@ -29,6 +29,11 @@ manifest_parse() {
   WG_NAME=$(yq -r '.name // ""' "$_f") || return 1
   WG_BRANCH=$(yq -r '.worktree.branch // ""' "$_f")
   WG_BASE=$(yq -r '.worktree.base // ""' "$_f")
+  WG_SOURCE=$(yq -r '.worktree.source // ""' "$_f")
+  case $WG_SOURCE in
+    '~') WG_SOURCE=$HOME ;;
+    '~/'*) WG_SOURCE="$HOME/${WG_SOURCE#~/}" ;;
+  esac
   WG_LAYOUT=$(yq -r '.layout // "tiled"' "$_f")
 
   _ids=$(yq -r '.agents[].id // ""' "$_f") || return 1
@@ -52,7 +57,7 @@ manifest_parse() {
   WG_EDGES=$(printf '%s' "$_edges" | awk 'NF{printf "%s%s", (NR>1?",":""), $0}')
 
   [ -z "$WG_BRANCH" ] && WG_BRANCH="wg/$WG_NAME"
-  export WG_NAME WG_BRANCH WG_BASE WG_LAYOUT WG_AGENTS WG_EDGES
+  export WG_NAME WG_BRANCH WG_BASE WG_SOURCE WG_LAYOUT WG_AGENTS WG_EDGES
 }
 
 manifest_validate() {

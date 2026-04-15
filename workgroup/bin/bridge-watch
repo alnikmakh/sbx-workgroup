@@ -11,8 +11,9 @@
 # down. (Caught during Phase 03 in-sandbox verification: the pipeline version
 # hung step 8 forever because `kill $shell_pid` never reached inotifywait.)
 set -eu
-SELF=$(readlink -f -- "$0" 2>/dev/null || printf %s "$0")
-HERE=$(cd "$(dirname "$SELF")" && pwd)
+_p=$0
+while [ -L "$_p" ]; do _d=$(cd "$(dirname "$_p")" && pwd -P); _l=$(readlink "$_p"); case $_l in /*) _p=$_l ;; *) _p="$_d/$_l" ;; esac; done
+HERE=$(cd "$(dirname "$_p")" && pwd -P)
 . "$HERE/../lib/bridge.sh"
 
 [ $# -ge 1 ] || { echo "usage: bridge-watch <name>" >&2; exit 2; }
