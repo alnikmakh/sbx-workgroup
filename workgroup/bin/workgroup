@@ -197,15 +197,17 @@ cmd_down() {
 
   if [ "$_force" = 1 ]; then
     if [ -d "$_wt" ]; then
-      # `set -e` would abort here on a non-zero return before we could read
-      # $? and dispatch to the friendly error messages below — guard with ||.
-      _rc=0
-      worktree_remove_if_clean "$_wt" || _rc=$?
-      case $_rc in
-        0) printf 'removed worktree: %s\n' "$_wt" ;;
-        1) die "worktree $_wt has uncommitted changes; commit or stash first" ;;
-        2) die "$_wt is not a git worktree" ;;
-      esac
+      # --force means "really nuke it" — agents always leave scratch files
+      # like .tmp/ behind, so refusing on a dirty worktree would force the
+      # user to rm -rf manually before every down. Bypass the clean check
+      # and call `git worktree remove --force` directly.
+      if git -C "$_wt" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        git -C "$_wt" worktree remove --force "$_wt" >&2 \
+          && printf 'removed worktree: %s\n' "$_wt" \
+          || die "failed to remove worktree $_wt"
+      else
+        die "$_wt is not a git worktree"
+      fi
     fi
   fi
 
