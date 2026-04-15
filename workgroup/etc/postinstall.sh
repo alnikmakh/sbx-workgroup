@@ -30,7 +30,7 @@ link_contract() {
     ln -sfn "$target" "$link"
     log "linked $link -> $target"
 }
-mkdir -p /opt /etc/workgroup
+mkdir -p /opt
 link_contract /work          "$WORK_SRC"
 link_contract /bridge        "$BRIDGE_SRC"
 link_contract /opt/workgroup "$WORKGROUP_SRC"
@@ -43,10 +43,43 @@ link_contract /opt/workgroup "$WORKGROUP_SRC"
 [ -d "$WORKTREE_SRC" ] || die "WORKTREE_SRC missing: $WORKTREE_SRC"
 [ -w "$WORKTREE_SRC" ] || die "WORKTREE_SRC not writable: $WORKTREE_SRC"
 
-# Persist the sidecar port so phase 04 can construct the claude mcp add URL.
-printf '%s\n' "$SIDECAR_PORT" > /etc/workgroup/sidecar-port
-# Persist the worktree root so workgroup/lib/worktree.sh can read it.
-printf '%s\n' "$WORKTREE_SRC" > /etc/workgroup/worktree-root
+# -- 0a. workgroup config --------------------------------------------------
+# Phase 08 part 2: the standalone workgroup CLI reads its runtime config from
+# $WORKGROUP_CONFIG (a YAML file) instead of /etc/workgroup/{sidecar-port,
+# worktree-root}. sbx mode now bootstraps that contract by writing a single
+# config.yaml and exporting WORKGROUP_HOME/WORKGROUP_CONFIG via profile.d,
+# so the in-VM flow uses exactly the same code path as a clone-and-run user
+# on Linux or macOS.
+WORKGROUP_HOME=/var/lib/workgroup
+mkdir -p "$WORKGROUP_HOME"
+cat > "$WORKGROUP_HOME/config.yaml" <<EOF
+# Written by workgroup/etc/postinstall.sh at sbx provision time.
+# Consumed by workgroup/lib/config.sh in the standalone dispatcher.
+bridge_root: $BRIDGE_SRC
+worktree_root: $WORKTREE_SRC
+mcp:
+  - name: cgc
+    transport: http
+    url: http://host.docker.internal:${SIDECAR_PORT}/mcp
+EOF
+log "wrote $WORKGROUP_HOME/config.yaml"
+
+cat > /etc/profile.d/workgroup.sh <<EOF
+# Written by workgroup/etc/postinstall.sh. Exposes the standalone CLI's
+# bootstrap env vars to every login shell inside the sandbox.
+export WORKGROUP_HOME=$WORKGROUP_HOME
+export WORKGROUP_CONFIG=$WORKGROUP_HOME/config.yaml
+EOF
+chmod 0644 /etc/profile.d/workgroup.sh
+# bash interactive non-login shells skip profile.d; mirror it into bash.bashrc.
+if [ -f /etc/bash.bashrc ] && ! grep -q 'workgroup-env' /etc/bash.bashrc; then
+    cat >> /etc/bash.bashrc <<EOF
+
+# workgroup-env: bootstrap vars for the standalone workgroup dispatcher.
+export WORKGROUP_HOME=\${WORKGROUP_HOME:-$WORKGROUP_HOME}
+export WORKGROUP_CONFIG=\${WORKGROUP_CONFIG:-$WORKGROUP_HOME/config.yaml}
+EOF
+fi
 
 # -- 1. Packages --------------------------------------------------------------
 pkgs_common="tmux git inotify-tools jq curl ca-certificates locales"
@@ -192,26 +225,12 @@ else
     rm -f "$installer"
 fi
 
-# -- 2a. Register cgc MCP server at user scope (as the sandbox runtime user) --
-# Every `workgroup up` worktree (/work/worktrees/<name>) is a distinct claude
-# project, so per-project registration doesn't reach role-injected panes.
-# Registering at --scope user makes cgc available in every project directory
-# without a per-pane `claude mcp add` step. Writes to $sbx_user_home/.claude.json
-# via the as_sbx_user helper defined in step 2.
-if as_sbx_user sh -c 'command -v claude >/dev/null 2>&1'; then
-    as_sbx_user claude mcp remove cgc --scope user >/dev/null 2>&1 || true
-    if as_sbx_user claude mcp add --transport http --scope user cgc \
-            "http://host.docker.internal:${SIDECAR_PORT}/mcp" >/dev/null 2>&1; then
-        log "registered cgc MCP server at user scope for $sbx_user"
-        cgc_status="registered at user scope -> http://host.docker.internal:${SIDECAR_PORT}/mcp"
-    else
-        log "warning: failed to register cgc MCP server as $sbx_user"
-        cgc_status="FAILED to register (see warning above)"
-    fi
-else
-    log "skipping cgc MCP registration (claude not installed for $sbx_user)"
-    cgc_status="SKIPPED (claude not installed for $sbx_user)"
-fi
+# -- 2a. cgc MCP registration -------------------------------------------------
+# Phase 08 part 2: the standalone dispatcher reads the cgc entry from
+# $WORKGROUP_CONFIG and calls `claude mcp add` for every `workgroup up`, so
+# postinstall no longer registers cgc directly. Keeping one source of truth
+# (the config.yaml above) avoids drift between postinstall and the runtime.
+cgc_status="driven by $WORKGROUP_HOME/config.yaml (registered by 'workgroup up')"
 
 # -- 3. Symlink workgroup/bridge binaries onto PATH ---------------------------
 if [ -d /opt/workgroup/bin ]; then
@@ -257,6 +276,8 @@ cat >&2 <<EOF
   yq:      $(yq --version 2>/dev/null || echo '?')
   claude:  $(as_sbx_user claude --version 2>/dev/null || echo '?')
   mounts:  $(ls -ld /work /bridge /opt/workgroup | awk '{print $NF}' | tr '\n' ' ')
+  wg home: ${WORKGROUP_HOME}
+  wg conf: ${WORKGROUP_HOME}/config.yaml
   wtroot:  ${WORKTREE_SRC}
   cgc mcp: ${cgc_status}
 EOF

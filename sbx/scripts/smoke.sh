@@ -203,7 +203,13 @@ else
   rpt fail "mounts /work /bridge /opt/workgroup"
 fi
 
-if [ -f /etc/workgroup/sidecar-port ] && curl -fsS "http://host.docker.internal:$(cat /etc/workgroup/sidecar-port)/health" >/dev/null 2>&1; then
+wg_cfg="${WORKGROUP_CONFIG:-/var/lib/workgroup/config.yaml}"
+cgc_url=""
+if [ -f "$wg_cfg" ] && command -v yq >/dev/null 2>&1; then
+  cgc_url="$(yq -r ".mcp[] | select(.name == \"cgc\") | .url" "$wg_cfg" 2>/dev/null || true)"
+fi
+health_url="${cgc_url%/mcp}/health"
+if [ -n "$cgc_url" ] && curl -fsS "$health_url" >/dev/null 2>&1; then
   rpt ok "in-sandbox sidecar /health reachable"
 else
   rpt fail "in-sandbox sidecar /health unreachable"
