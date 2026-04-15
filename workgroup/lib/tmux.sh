@@ -55,7 +55,9 @@ _tx_label_pane() {
 
 tmux_add_watch_window() {
   # $1 = session name, $2 = workgroup name (for bridge-watch arg)
-  tmux new-window -t "$1:" -n watch "bridge-watch $2" \
+  # Use the absolute path so bridge-watch is found whether or not
+  # WORKGROUP_ROOT/bin is symlinked onto the system PATH.
+  tmux new-window -t "$1:" -n watch "$WORKGROUP_ROOT/bin/bridge-watch $2" \
     || { _tx_die "new-window watch failed"; return 1; }
 }
 
@@ -73,7 +75,10 @@ tmux_send_launch() {
   # unset ANTHROPIC_API_KEY: sbx bakes ANTHROPIC_API_KEY=proxy-managed into
   # pid 1, which claude mistakes for a real key and rejects, masking the
   # OAuth creds set up by `claude /login`. Drop it for this pane only.
-  _cmd="cd $(_tx_q "$_cwd") && unset ANTHROPIC_API_KEY && BRIDGE_DIR=$(_tx_q "$_bd") AGENT_ID=$(_tx_q "$_ag") AGENT_PEERS_OUT=$(_tx_q "$_out") AGENT_PEERS_IN=$(_tx_q "$_in") claude --dangerously-skip-permissions --append-system-prompt \"\$(cat $(_tx_q "$_role"))\""
+  # Prepend WORKGROUP_ROOT/bin to PATH so the agent finds bridge-send /
+  # bridge-recv / bridge-peek without needing them symlinked into /usr/local
+  # (which only happens in sbx-mode postinstall).
+  _cmd="cd $(_tx_q "$_cwd") && unset ANTHROPIC_API_KEY && export PATH=$(_tx_q "$WORKGROUP_ROOT/bin"):\$PATH && BRIDGE_DIR=$(_tx_q "$_bd") AGENT_ID=$(_tx_q "$_ag") AGENT_PEERS_OUT=$(_tx_q "$_out") AGENT_PEERS_IN=$(_tx_q "$_in") claude --dangerously-skip-permissions --append-system-prompt \"\$(cat $(_tx_q "$_role"))\""
   tmux send-keys -t "$_pid" "$_cmd" C-m
 }
 
